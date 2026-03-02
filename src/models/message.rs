@@ -1,0 +1,259 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+/// 工具定义
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Tool {
+    pub name: String,
+    pub description: String,
+    pub input_schema: serde_json::Value,
+}
+
+/// 工具调用
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+}
+
+/// 工具结果
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolResult {
+    pub tool_call_id: String,
+    pub content: String,
+    pub is_error: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum MessageRole {
+    User,
+    Assistant,
+    System,
+    ToolCall,
+    ToolResult,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Message {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub role: MessageRole,
+    pub content: String,
+    pub timestamp: DateTime<Utc>,
+    pub metadata: Option<serde_json::Value>,
+    /// 工具调用列表（仅当 role == ToolCall 时有值）
+    pub tool_calls: Option<Vec<ToolCall>>,
+    /// 工具结果（仅当 role == ToolResult 时有值）
+    pub tool_result: Option<ToolResult>,
+}
+
+impl Message {
+    pub fn new(session_id: Uuid, role: MessageRole, content: String) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            session_id,
+            role,
+            content,
+            timestamp: Utc::now(),
+            metadata: None,
+            tool_calls: None,
+            tool_result: None,
+        }
+    }
+
+    pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
+
+    pub fn with_tool_calls(mut self, tool_calls: Vec<ToolCall>) -> Self {
+        self.tool_calls = Some(tool_calls);
+        self
+    }
+
+    pub fn with_tool_result(mut self, tool_result: ToolResult) -> Self {
+        self.tool_result = Some(tool_result);
+        self
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SendMessageRequest {
+    pub session_id: Option<Uuid>,
+    pub content: String,
+    pub metadata: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SendMessageResponse {
+    pub message_id: Uuid,
+    pub session_id: Uuid,
+    pub assistant_response: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListMessagesResponse {
+    pub messages: Vec<Message>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_message_new_defaults() {
+        let session_id = Uuid::new_v4();
+        let msg = Message::new(session_id, MessageRole::User, "hello".to_string());
+
+        assert_eq!(msg.session_id, session_id);
+        assert_eq!(msg.role, MessageRole::User);
+        assert_eq!(msg.content, "hello");
+        assert!(msg.metadata.is_none());
+        assert!(msg.tool_calls.is_none());
+        assert!(msg.tool_result.is_none());
+    }
+
+    #[test]
+    fn test_with_tool_calls() {
+        let session_id = Uuid::new_v4();
+        let tool_call = ToolCall {
+            id: "call_123".to_string(),
+            name: "test_tool".to_string(),
+            arguments: json!({"param": "value"}),
+        };
+
+        let msg = Message::new(session_id, MessageRole::ToolCall, "".to_string())
+            .with_tool_calls(vec![tool_call.clone()]);
+
+        assert!(msg.tool_calls.is_some());
+        let calls = msg.tool_calls.unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call_123");
+        assert_eq!(calls[0].name, "test_tool");
+    }
+
+    #[test]
+    fn test_with_tool_result() {
+        let session_id = Uuid::new_v4();
+        let tool_result = ToolResult {
+            tool_call_id: "call_123".to_string(),
+            content: "result content".to_string(),
+            is_error: false,
+        };
+
+        let msg = Message::new(session_id, MessageRole::ToolResult, "".to_string())
+            .with_tool_result(tool_result.clone());
+
+        assert!(msg.tool_result.is_some());
+        let result = msg.tool_result.unwrap();
+        assert_eq!(result.tool_call_id, "call_123");
+        assert_eq!(result.content, "result content");
+        assert!(!result.is_error);
+    }
+
+    #[test]
+    fn test_message_role_serialization() {
+        let roles = vec![
+            MessageRole::User,
+            MessageRole::Assistant,
+            MessageRole::System,
+            MessageRole::ToolCall,
+            MessageRole::ToolResult,
+        ];
+
+        for role in roles {
+            let serialized = serde_json::to_string(&role).unwrap();
+            let deserialized: MessageRole = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(role, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_tool_serialization() {
+        let tool = Tool {
+            name: "test_tool".to_string(),
+            description: "A test tool".to_string(),
+            input_schema: json!({"type": "object"}),
+        };
+
+        let serialized = serde_json::to_string(&tool).unwrap();
+        let deserialized: Tool = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(tool.name, deserialized.name);
+        assert_eq!(tool.description, deserialized.description);
+        assert_eq!(tool.input_schema, deserialized.input_schema);
+    }
+
+    #[test]
+    fn test_tool_call_serialization() {
+        let tool_call = ToolCall {
+            id: "call_123".to_string(),
+            name: "test_tool".to_string(),
+            arguments: json!({"param": "value"}),
+        };
+
+        let serialized = serde_json::to_string(&tool_call).unwrap();
+        let deserialized: ToolCall = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(tool_call.id, deserialized.id);
+        assert_eq!(tool_call.name, deserialized.name);
+        assert_eq!(tool_call.arguments, deserialized.arguments);
+    }
+
+    #[test]
+    fn test_tool_result_serialization() {
+        let tool_result = ToolResult {
+            tool_call_id: "call_123".to_string(),
+            content: "result".to_string(),
+            is_error: true,
+        };
+
+        let serialized = serde_json::to_string(&tool_result).unwrap();
+        let deserialized: ToolResult = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(tool_result.tool_call_id, deserialized.tool_call_id);
+        assert_eq!(tool_result.content, deserialized.content);
+        assert_eq!(tool_result.is_error, deserialized.is_error);
+    }
+
+    #[test]
+    fn test_message_with_tool_calls_serialization() {
+        let session_id = Uuid::new_v4();
+        let tool_call = ToolCall {
+            id: "call_123".to_string(),
+            name: "test_tool".to_string(),
+            arguments: json!({"param": "value"}),
+        };
+
+        let msg = Message::new(session_id, MessageRole::ToolCall, "".to_string())
+            .with_tool_calls(vec![tool_call]);
+
+        let serialized = serde_json::to_string(&msg).unwrap();
+        let deserialized: Message = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(msg.id, deserialized.id);
+        assert_eq!(msg.role, deserialized.role);
+        assert!(deserialized.tool_calls.is_some());
+    }
+
+    #[test]
+    fn test_chained_builders() {
+        let session_id = Uuid::new_v4();
+        let tool_call = ToolCall {
+            id: "call_123".to_string(),
+            name: "test_tool".to_string(),
+            arguments: json!({"param": "value"}),
+        };
+        let metadata = json!({"key": "value"});
+
+        let msg = Message::new(session_id, MessageRole::ToolCall, "".to_string())
+            .with_metadata(metadata.clone())
+            .with_tool_calls(vec![tool_call]);
+
+        assert_eq!(msg.metadata, Some(metadata));
+        assert!(msg.tool_calls.is_some());
+    }
+}
