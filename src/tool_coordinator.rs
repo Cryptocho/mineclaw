@@ -87,20 +87,22 @@ impl ToolCoordinator {
                 .await?;
 
             // 5. 处理响应
-            // 如果有文本内容，创建助手消息
-            if let Some(text) = &llm_response.text {
-                let assistant_message = self.create_assistant_message(&messages, text.clone());
-                intermediate_messages.push(assistant_message);
-            }
-
-            // 6. 如果有工具调用，执行它们
+            // 如果有工具调用
             if !llm_response.tool_calls.is_empty() {
                 info!("LLM returned {} tool calls", llm_response.tool_calls.len());
 
-                // 创建工具调用消息
-                let tool_call_message =
-                    self.create_tool_call_message(&messages, &llm_response.tool_calls);
-                intermediate_messages.push(tool_call_message.clone());
+                // 方案：只创建 ToolCall 消息，文本放在 ToolCall 消息的 content 中
+                // 这样避免了消息重复，也保持了数据完整性
+                let mut tool_call_message = self.create_tool_call_message(&messages, &llm_response.tool_calls);
+                
+                // 如果有文本，添加到 ToolCall 消息中
+                if let Some(text) = &llm_response.text {
+                    if !text.is_empty() {
+                        tool_call_message.content = text.clone();
+                    }
+                }
+                
+                intermediate_messages.push(tool_call_message);
 
                 // 执行工具调用
                 for tool_call in llm_response.tool_calls {
@@ -120,6 +122,11 @@ impl ToolCoordinator {
                 let final_text = llm_response.text.ok_or_else(|| {
                     Error::Llm("LLM returned empty response".into())
                 })?;
+                
+                // 添加最终的文本消息
+                let assistant_message = self.create_assistant_message(&messages, final_text.clone());
+                intermediate_messages.push(assistant_message);
+                
                 return Ok((final_text, intermediate_messages));
             }
         }
