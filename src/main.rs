@@ -38,7 +38,7 @@ async fn main() -> mineclaw::Result<()> {
                 mcp_config.servers.len()
             );
             for server_config in &mcp_config.servers {
-                match mcp_server_manager.start_server(server_config).await {
+                match mcp_server_manager.start_server(server_config.clone()).await {
                     Ok(_) => {
                         info!("Successfully started MCP server: {}", server_config.name);
                     }
@@ -65,6 +65,7 @@ async fn main() -> mineclaw::Result<()> {
     );
 
     let app_state = AppState::new(
+        config.clone(),
         session_repo,
         llm_provider,
         mcp_server_manager_arc,

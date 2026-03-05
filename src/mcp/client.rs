@@ -8,6 +8,7 @@ use crate::mcp::transport::Transport;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use tokio::sync::oneshot;
+use tokio::time::{timeout, Duration};
 use tracing::{debug, error, info, warn};
 
 // ==================== McpClient ====================
@@ -56,35 +57,49 @@ impl McpClient {
 
         self.transport.send(&request_json).await?;
 
-        // 简单的接收循环：等待响应
-        loop {
-            let message = self.transport.receive().await?;
-            debug!(message, "Received message from server");
+        // 使用 tokio::time::timeout 包装接收循环
+        let result = timeout(Duration::from_secs(30), async {
+            loop {
+                let message = self.transport.receive().await?;
+                debug!(message, "Received message from server");
 
-            // 尝试解析为响应
-            if let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&message) {
-                if response.id == request_id {
-                    if let Some(sender) = self.pending_requests.remove(&response.id) {
-                        debug!(?response.id, "Matched response to pending request");
+                // 尝试解析为响应
+                if let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&message) {
+                    if response.id == request_id {
+                        if let Some(sender) = self.pending_requests.remove(&response.id) {
+                            debug!(?response.id, "Matched response to pending request");
+                            let _ = sender.send(response);
+                            break;
+                        }
+                    } else if let Some(sender) = self.pending_requests.remove(&response.id) {
+                        warn!(?response.id, "Received response for different request ID");
                         let _ = sender.send(response);
-                        break;
+                    } else {
+                        warn!(?response.id, "Received response for unknown request ID");
                     }
-                } else if let Some(sender) = self.pending_requests.remove(&response.id) {
-                    warn!(?response.id, "Received response for different request ID");
-                    let _ = sender.send(response);
-                } else {
-                    warn!(?response.id, "Received response for unknown request ID");
+                    continue;
                 }
-                continue;
-            }
 
-            // 尝试解析为通知
-            if let Ok(notification) = serde_json::from_str::<JsonRpcNotification>(&message) {
-                self.handle_notification(notification).await;
-                continue;
-            }
+                // 尝试解析为通知
+                if let Ok(notification) = serde_json::from_str::<JsonRpcNotification>(&message) {
+                    self.handle_notification(notification).await;
+                    continue;
+                }
 
-            warn!(message, "Received unrecognized message");
+                warn!(message, "Received unrecognized message");
+            }
+            Ok::<(), Error>(())
+        }).await;
+
+        if let Err(_) = result {
+             // 超时处理：清理 pending_requests
+             self.pending_requests.remove(&request_id);
+             return Err(Error::Mcp(format!("Request {} timed out", method)));
+        }
+        
+        // 内部循环可能出错，也要处理
+        if let Err(e) = result.unwrap() {
+             return Err(e);
         }
 
         match rx.await {
@@ -166,10 +181,16 @@ impl McpClient {
     pub async fn list_tools(&mut self) -> Result<ListToolsResponse> {
         debug!("Listing tools");
 
-        let request = ListToolsRequest::new();
-        let params = serde_json::to_value(request)
-            .map_err(|e| Error::Mcp(format!("Failed to serialize list_tools request: {}", e)))?;
+        // 注意：tools/list 请求可以不带参数，也可以带 { cursor: string }
+        // 这里的 ListToolsRequest 可能会序列化出 { cursor: null }，导致某些服务器报错
+        // 我们手动构建参数，如果 cursor 为 None 则不包含该字段
+        let params = serde_json::json!({});
+        // 或者如果 ListToolsRequest 实现了正确的 skip_serializing_if
 
+        // 暂时简单处理：直接发送空对象作为参数，或者不传参数（视协议而定）
+        // 根据 MCP 规范，params 应该是可选的。
+        // 但如果之前的 ListToolsRequest::new() 生成了 { cursor: null }，且服务器校验严格（如 Node SDK），就会报错。
+        
         let response: ListToolsResponse = self.send_request("tools/list", Some(params)).await?;
 
         debug!(tool_count = response.tools.len(), "Received tools list");

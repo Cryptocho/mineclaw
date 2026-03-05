@@ -9,7 +9,7 @@ use crate::models::{Message, MessageRole, Tool, ToolCall, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info, warn};
 
 // ==================== ToolCoordinatorCallback ====================
@@ -51,7 +51,7 @@ impl ToolCoordinatorCallback for NoopCallback {
 
 /// 工具调用协调器
 pub struct ToolCoordinator {
-    llm_provider: Arc<dyn LlmProvider>,
+    llm_provider: Arc<RwLock<Arc<dyn LlmProvider>>>,
     mcp_server_manager: Arc<Mutex<McpServerManager>>,
     tool_executor: ToolExecutor,
     /// 最大工具调用轮数
@@ -66,7 +66,7 @@ impl ToolCoordinator {
         tool_executor: ToolExecutor,
     ) -> Self {
         Self {
-            llm_provider,
+            llm_provider: Arc::new(RwLock::new(llm_provider)),
             mcp_server_manager,
             tool_executor,
             max_iterations: 10,
@@ -125,11 +125,74 @@ impl ToolCoordinator {
             debug!("Available tools: {}", tools.len());
 
             // 2. 转换消息为 LLM 格式
-            let chat_messages: Vec<ChatMessage> = messages
-                .iter()
-                .chain(intermediate_messages.iter())
-                .map(ChatMessage::from_message)
-                .collect();
+            let mut chat_messages: Vec<ChatMessage> = Vec::new();
+
+            // 注入 System Prompt
+            // 检测 OS 和 Shell 环境
+            #[cfg(target_os = "windows")]
+            let os_info = "Windows";
+            #[cfg(not(target_os = "windows"))]
+            let os_info = "Linux/macOS";
+            
+            // 获取 Terminal Server 的 Shell 类型
+            let mut shell_type_string = String::new();
+            let mut shell_info = "Unknown Shell";
+
+            {
+                let manager = self.mcp_server_manager.lock().await;
+                if let Some(server) = manager.get_server("terminal-server") {
+                    if let Some(st) = server.metadata.get("shell_type") {
+                        shell_type_string = st.clone();
+                    }
+                }
+            }
+
+            match shell_type_string.as_str() {
+                "powershell" => {
+                    shell_info = "PowerShell (use `$env:VAR = 'val'`, `;` or `&&` for chaining)";
+                }
+                "cmd" => {
+                    shell_info = "CMD (use `set VAR=val`, `&&` for chaining)";
+                }
+                "bash" | "zsh" | "sh" => {
+                    shell_info = "Bash/Zsh (use `export VAR=val`, `&&` for chaining)";
+                }
+                _ => {
+                    // Fallback detection
+                    if cfg!(target_os = "windows") {
+                        shell_info = "PowerShell (Default)";
+                    } else {
+                        shell_info = "Bash/Zsh (Default)";
+                    }
+                }
+            }
+
+            let system_prompt = format!(
+                "You are MineClaw, an advanced AI coding assistant.\n\
+                 Current Environment:\n\
+                 - OS: {}\n\
+                 - Shell: {}\n\
+                 \n\
+                 When executing terminal commands, ensure you use the correct syntax for the current shell.\n\
+                 For PowerShell, use `$env:VAR = 'val'` to set variables, and `;` or `&&` (if PS 7+) to chain commands.\n\
+                 For file paths, prefer forward slashes `/` as they work in both, or use `join-path` in PS.",
+                os_info, shell_info
+            );
+
+            chat_messages.push(ChatMessage {
+                role: "system".to_string(),
+                content: Some(system_prompt),
+                tool_calls: None,
+                tool_call_id: None,
+            });
+
+            // 添加历史消息
+            chat_messages.extend(
+                messages
+                    .iter()
+                    .chain(intermediate_messages.iter())
+                    .map(ChatMessage::from_message)
+            );
 
             // 3. 转换工具为 LLM 格式
             let chat_tools: Vec<ChatTool> = tools
@@ -138,8 +201,8 @@ impl ToolCoordinator {
                 .collect();
 
             // 4. 调用 LLM
-            let llm_response = self
-                .llm_provider
+            let llm_provider = self.llm_provider.read().await;
+            let llm_response = llm_provider
                 .chat_with_tools(chat_messages, chat_tools)
                 .await?;
 
@@ -279,5 +342,11 @@ impl ToolCoordinator {
             result.text_content.clone(),
         )
         .with_tool_result(tool_result)
+    }
+
+    /// 更新 LLM Provider
+    pub async fn update_llm_provider(&self, provider: Arc<dyn LlmProvider>) {
+        let mut llm_provider = self.llm_provider.write().await;
+        *llm_provider = provider;
     }
 }

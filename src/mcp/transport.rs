@@ -5,6 +5,7 @@
 use crate::error::{Error, Result};
 use async_trait::async_trait;
 use std::process::Stdio;
+use std::collections::HashMap;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tracing::{debug, error, info};
@@ -34,24 +35,24 @@ pub struct StdioTransport {
 }
 
 impl StdioTransport {
-    /// 创建一个新的 stdio 传输层并启动子进程
+    /// 启动一个新进程作为 MCP 服务器
     pub async fn spawn(
         command: &str,
         args: &[String],
-        env: &std::collections::HashMap<String, String>,
+        env: HashMap<String, String>,
     ) -> Result<Self> {
-        info!(command, ?args, "Spawning MCP server process");
+        info!(
+            command = command,
+            args = ?args,
+            "Spawning MCP server process"
+        );
 
         let mut cmd = Command::new(command);
         cmd.args(args)
+            .envs(env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
-
-        // 设置环境变量
-        for (key, value) in env {
-            cmd.env(key, value);
-        }
+            .stderr(Stdio::inherit()); // 将 stderr 继承到父进程，方便调试
 
         let mut child = cmd.spawn().map_err(|e| {
             error!(error = %e, "Failed to spawn MCP server");

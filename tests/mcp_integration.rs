@@ -35,7 +35,7 @@ async fn test_mcp_server_integration() {
 
     // 启动服务器
     println!("Starting MCP server...");
-    let result = manager.start_server(&server_config).await;
+    let result = manager.start_server(server_config).await;
 
     // 服务器可能会失败（如果没有 Node.js），但我们至少测试启动流程
     if result.is_ok() {
@@ -116,7 +116,7 @@ async fn test_mcp_tool_call_integration() {
 
     let mut manager = McpServerManager::new();
 
-    if let Ok(_) = manager.start_server(&server_config).await {
+    if let Ok(_) = manager.start_server(server_config).await {
         println!("MCP server started, testing tool calls...");
 
         // 测试 1: 使用管理器直接调用 echo 工具

@@ -4,7 +4,6 @@
 
 use crate::models::Tool;
 use std::collections::HashMap;
-use tracing::{debug, warn};
 
 // ==================== ToolRegistry ====================
 
@@ -26,40 +25,25 @@ impl ToolRegistry {
         }
     }
 
-    /// 注册一个服务器的所有工具
+    /// 注册服务器工具
     pub fn register_server(&mut self, server_name: String, tools: Vec<Tool>) {
-        debug!(server_name = %server_name, tool_count = tools.len(), "Registering server tools");
+        // 先移除旧的映射
+        self.unregister_server(&server_name);
 
-        // 更新服务器到工具的映射
-        self.server_tools.insert(server_name.clone(), tools.clone());
-
-        // 更新工具到服务器的映射
-        for tool in tools {
-            if let Some(existing_server) = self
-                .tool_to_server
-                .insert(tool.name.clone(), server_name.clone())
-            {
-                warn!(
-                    tool_name = %tool.name,
-                    old_server = %existing_server,
-                    new_server = %server_name,
-                    "Tool name conflict, overwriting"
-                );
-            }
+        // 添加新的映射
+        for tool in &tools {
+            self.tool_to_server
+                .insert(tool.name.clone(), server_name.clone());
         }
+
+        self.server_tools.insert(server_name, tools);
     }
 
-    /// 注销一个服务器的所有工具
+    /// 注销服务器工具
     pub fn unregister_server(&mut self, server_name: &str) {
-        debug!(server_name = %server_name, "Unregistering server tools");
-
         if let Some(tools) = self.server_tools.remove(server_name) {
             for tool in tools {
-                if let Some(registered_server) = self.tool_to_server.get(&tool.name)
-                    && registered_server == server_name
-                {
-                    self.tool_to_server.remove(&tool.name);
-                }
+                self.tool_to_server.remove(&tool.name);
             }
         }
     }

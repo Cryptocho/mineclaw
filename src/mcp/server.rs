@@ -37,6 +37,8 @@ pub struct McpServerHandle {
     pub tools: Vec<Tool>,
     /// 服务器状态
     pub status: ServerStatus,
+    /// 服务器元数据 (如 shell_type)
+    pub metadata: HashMap<String, String>,
 }
 
 impl McpServerHandle {
@@ -47,6 +49,7 @@ impl McpServerHandle {
             client: None,
             tools: Vec::new(),
             status: ServerStatus::Connecting,
+            metadata: HashMap::new(),
         }
     }
 
@@ -84,7 +87,7 @@ impl McpServerManager {
     }
 
     /// 启动一个 MCP 服务器
-    pub async fn start_server(&mut self, config: &McpServerConfig) -> Result<()> {
+    pub async fn start_server(&mut self, config: McpServerConfig) -> Result<()> {
         info!(server_name = %config.name, "Starting MCP server");
 
         if self.servers.contains_key(&config.name) {
@@ -97,7 +100,7 @@ impl McpServerManager {
 
         // 启动传输层
         let transport =
-            match StdioTransport::spawn(&config.command, &config.args, &config.env).await {
+            match StdioTransport::spawn(&config.command, &config.args, config.env).await {
                 Ok(t) => t,
                 Err(e) => {
                     error!(server_name = %config.name, error = %e, "Failed to spawn server");
@@ -126,7 +129,6 @@ impl McpServerManager {
             }
         }
 
-        // 获取工具列表
         let tools_response = match client.list_tools().await {
             Ok(r) => r,
             Err(e) => {
@@ -138,6 +140,34 @@ impl McpServerManager {
                 return Err(e);
             }
         };
+
+        // 尝试获取 Shell 信息 (如果是 terminal-server)
+        let mut shell_type = None;
+        if config.name == "terminal-server" {
+             if tools_response.tools.iter().any(|t| t.name == "get_shell_info") {
+                 debug!("Fetching shell info from terminal-server");
+                 match client.call_tool("get_shell_info".to_string(), serde_json::json!({})).await {
+                     Ok(response) => {
+                         if let Some(content) = response.content.first() {
+                             match content {
+                                 crate::mcp::protocol::ToolResultContent::Text { text } => {
+                                     if let Ok(info) = serde_json::from_str::<serde_json::Value>(text) {
+                                         if let Some(st) = info.get("shell_type").and_then(|s| s.as_str()) {
+                                             info!(shell_type = %st, "Detected shell type");
+                                             shell_type = Some(st.to_string());
+                                         }
+                                     }
+                                 }
+                                 _ => {}
+                             }
+                         }
+                     },
+                     Err(e) => {
+                         warn!(error = %e, "Failed to get shell info");
+                     }
+                 }
+             }
+        }
 
         let tools: Vec<Tool> = tools_response
             .tools
@@ -156,6 +186,9 @@ impl McpServerManager {
             handle.client = Some(client);
             handle.tools = tools.clone();
             handle.status = ServerStatus::Connected;
+            if let Some(st) = shell_type {
+                handle.metadata.insert("shell_type".to_string(), st);
+            }
         }
 
         // 注册到工具注册表
@@ -166,20 +199,20 @@ impl McpServerManager {
     }
 
     /// 停止一个 MCP 服务器
-    pub async fn stop_server(&mut self, name: &str) -> Result<()> {
-        info!(server_name = name, "Stopping MCP server");
+    pub async fn stop_server(&mut self, server_name: &str) -> Result<()> {
+        info!(server_name = %server_name, "Stopping MCP server");
 
-        if let Some(mut handle) = self.servers.remove(name) {
-            if let Some(mut client) = handle.client.take()
-                && let Err(e) = client.close().await
-            {
-                warn!(server_name = name, error = %e, "Error while closing client");
+        if let Some(mut handle) = self.servers.remove(server_name) {
+            // 关闭客户端
+            if let Some(mut client) = handle.client.take() {
+                let _ = client.close().await;
             }
-            handle.status = ServerStatus::Error("Stopped".to_string());
+            
+            // 从工具注册表中移除
+            self.tool_registry.unregister_server(server_name);
+        } else {
+            warn!(server_name = %server_name, "Server not found to stop");
         }
-
-        // 从工具注册表中注销
-        self.tool_registry.unregister_server(name);
 
         Ok(())
     }
@@ -210,6 +243,11 @@ impl McpServerManager {
             }
         }
         result
+    }
+
+    /// 列出所有工具（别名）
+    pub fn list_tools(&self) -> Vec<(String, Tool)> {
+        self.all_tools()
     }
 
     /// 停止所有服务器

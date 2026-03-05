@@ -7,6 +7,9 @@ pub enum Error {
     #[error("Configuration error: {0}")]
     Config(#[from] config::ConfigError),
 
+    #[error("Configuration error: {0}")]
+    ConfigError(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -51,6 +54,7 @@ impl axum::response::IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
         let status = match &self {
             Error::Config(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Error::ConfigError(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             Error::Io(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             Error::Reqwest(_) => axum::http::StatusCode::BAD_GATEWAY,
             Error::SerdeJson(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR,

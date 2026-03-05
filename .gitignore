@@ -1,2 +1,26 @@
+# Rust
 /target
 /config/mineclaw.toml
+/config/master.key
+**/*.rs.bk
+
+# Node.js
+node_modules/
+package-lock.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+.clinerules/
+.trae/
+
+# Logs & Temp
+*.log
+*.tmp

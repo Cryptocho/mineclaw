@@ -8,6 +8,7 @@ pub mod error;
 pub mod llm;
 pub mod mcp;
 pub mod models;
+pub mod security;
 pub mod state;
 pub mod tool_coordinator;
 
