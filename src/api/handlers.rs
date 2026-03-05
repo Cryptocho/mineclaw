@@ -3,7 +3,7 @@ use axum::extract::{Path, State};
 use axum::response::sse::{Event, Sse};
 use futures_util::stream::Stream;
 use std::convert::Infallible;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::api::sse;
@@ -160,4 +160,84 @@ pub async fn session_stream(
         Uuid::new_v4()
     });
     sse::session_stream(state, session_id).await
+}
+
+// ==================== 管理 API Handlers ====================
+
+pub async fn list_tools(
+    State(state): State<AppState>,
+) -> Result<Json<crate::models::ListToolsResponse>> {
+    info!("List tools request received");
+
+    let manager = state.mcp_server_manager.lock().await;
+    let all_tools = manager.all_tools();
+
+    let tools: Vec<crate::models::ToolInfo> = all_tools
+        .into_iter()
+        .map(|(server_name, tool)| crate::models::ToolInfo {
+            name: tool.name,
+            description: tool.description,
+            server_name,
+            input_schema: tool.input_schema,
+        })
+        .collect();
+
+    info!("List tools response sent, count: {}", tools.len());
+
+    Ok(Json(crate::models::ListToolsResponse { tools }))
+}
+
+pub async fn list_mcp_servers(
+    State(state): State<AppState>,
+) -> Result<Json<crate::models::ListMcpServersResponse>> {
+    info!("List MCP servers request received");
+
+    let manager = state.mcp_server_manager.lock().await;
+    let servers = manager.list_servers();
+
+    let servers_info: Vec<crate::models::McpServerInfo> = servers
+        .into_iter()
+        .map(|handle| crate::models::McpServerInfo {
+            name: handle.name.clone(),
+            status: handle.status.clone(),
+            tool_count: handle.tools.len(),
+            uptime_seconds: handle.uptime_seconds(),
+            last_health_check: handle.last_health_check,
+        })
+        .collect();
+
+    info!(
+        "List MCP servers response sent, count: {}",
+        servers_info.len()
+    );
+
+    Ok(Json(crate::models::ListMcpServersResponse {
+        servers: servers_info,
+    }))
+}
+
+pub async fn restart_mcp_server(
+    State(state): State<AppState>,
+    Path(server_name): Path<String>,
+) -> Result<Json<crate::models::RestartMcpServerResponse>> {
+    info!("Restart MCP server request received: {}", server_name);
+
+    let mut manager = state.mcp_server_manager.lock().await;
+
+    match manager.restart_server(&server_name).await {
+        Ok(_) => {
+            info!("MCP server '{}' restarted successfully", server_name);
+            Ok(Json(crate::models::RestartMcpServerResponse {
+                success: true,
+                message: format!("Server '{}' restarted successfully", server_name),
+            }))
+        }
+        Err(e) => {
+            error!("Failed to restart MCP server '{}': {}", server_name, e);
+            Ok(Json(crate::models::RestartMcpServerResponse {
+                success: false,
+                message: format!("Failed to restart server: {}", e),
+            }))
+        }
+    }
 }

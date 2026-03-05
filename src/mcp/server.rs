@@ -9,18 +9,23 @@ use crate::mcp::protocol::{CallToolResponse, ProtocolTool};
 use crate::mcp::registry::ToolRegistry;
 use crate::mcp::transport::StdioTransport;
 use crate::models::Tool;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{debug, error, info, warn};
 
 // ==================== ServerStatus ====================
 
 /// MCP 服务器状态
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "message")]
 pub enum ServerStatus {
     /// 正在连接
     Connecting,
     /// 已连接
     Connected,
+    /// 已断开连接
+    Disconnected,
     /// 发生错误
     Error(String),
 }
@@ -37,6 +42,12 @@ pub struct McpServerHandle {
     pub tools: Vec<Tool>,
     /// 服务器状态
     pub status: ServerStatus,
+    /// 服务器配置（用于重启）
+    pub config: Option<McpServerConfig>,
+    /// 启动时间
+    pub started_at: Option<DateTime<Utc>>,
+    /// 最后健康检查时间
+    pub last_health_check: Option<DateTime<Utc>>,
 }
 
 impl McpServerHandle {
@@ -47,6 +58,9 @@ impl McpServerHandle {
             client: None,
             tools: Vec::new(),
             status: ServerStatus::Connecting,
+            config: None,
+            started_at: None,
+            last_health_check: None,
         }
     }
 
@@ -57,6 +71,12 @@ impl McpServerHandle {
             description: tool.description.clone(),
             input_schema: tool.input_schema.clone(),
         }
+    }
+
+    /// 获取运行时间（秒）
+    pub fn uptime_seconds(&self) -> Option<u64> {
+        self.started_at
+            .map(|started| (Utc::now() - started).num_seconds().max(0) as u64)
     }
 }
 
@@ -92,7 +112,9 @@ impl McpServerManager {
             self.stop_server(&config.name).await?;
         }
 
-        let handle = McpServerHandle::new(config.name.clone());
+        let mut handle = McpServerHandle::new(config.name.clone());
+        handle.config = Some(config.clone());
+        handle.started_at = Some(Utc::now());
         self.servers.insert(config.name.clone(), handle);
 
         // 启动传输层
@@ -156,6 +178,7 @@ impl McpServerManager {
             handle.client = Some(client);
             handle.tools = tools.clone();
             handle.status = ServerStatus::Connected;
+            handle.last_health_check = Some(Utc::now());
         }
 
         // 注册到工具注册表
@@ -163,6 +186,64 @@ impl McpServerManager {
             .register_server(config.name.clone(), tools);
 
         Ok(())
+    }
+
+    /// 重启一个 MCP 服务器
+    pub async fn restart_server(&mut self, name: &str) -> Result<()> {
+        info!(server_name = name, "Restarting MCP server");
+
+        let config = self
+            .get_server(name)
+            .and_then(|h| h.config.clone())
+            .ok_or_else(|| Error::McpServer {
+                server: name.to_string(),
+                message: "Server configuration not found".to_string(),
+            })?;
+
+        self.stop_server(name).await?;
+        self.start_server(&config).await?;
+
+        info!(server_name = name, "MCP server restarted successfully");
+        Ok(())
+    }
+
+    /// 健康检查一个 MCP 服务器
+    pub async fn health_check(&mut self, name: &str) -> Result<bool> {
+        debug!(server_name = name, "Performing health check");
+
+        let handle = match self.servers.get_mut(name) {
+            Some(h) => h,
+            None => {
+                return Ok(false);
+            }
+        };
+
+        handle.last_health_check = Some(Utc::now());
+
+        if handle.status != ServerStatus::Connected {
+            return Ok(false);
+        }
+
+        let client = match handle.client.as_mut() {
+            Some(c) => c,
+            None => {
+                handle.status = ServerStatus::Disconnected;
+                return Ok(false);
+            }
+        };
+
+        // 通过调用 list_tools 来测试连接
+        match client.list_tools().await {
+            Ok(_) => {
+                debug!(server_name = name, "Health check passed");
+                Ok(true)
+            }
+            Err(e) => {
+                error!(server_name = name, error = %e, "Health check failed");
+                handle.status = ServerStatus::Error(e.to_string());
+                Ok(false)
+            }
+        }
     }
 
     /// 停止一个 MCP 服务器

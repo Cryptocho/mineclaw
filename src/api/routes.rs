@@ -14,5 +14,12 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/sessions/{id}", delete(handlers::delete_session))
         .route("/api/sessions/{id}/messages", get(handlers::list_messages))
         .route("/api/sessions/{id}/stream", get(handlers::session_stream))
+        // 管理 API
+        .route("/api/tools", get(handlers::list_tools))
+        .route("/api/mcp/servers", get(handlers::list_mcp_servers))
+        .route(
+            "/api/mcp/servers/{name}/restart",
+            post(handlers::restart_mcp_server),
+        )
         .with_state(state)
 }
