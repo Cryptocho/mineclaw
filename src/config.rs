@@ -51,10 +51,51 @@ pub struct FilesystemConfig {
     pub max_read_bytes: usize,
     #[serde(default)]
     pub allowed_directories: Vec<String>,
+    #[serde(default)]
+    pub checkpoint: CheckpointConfig,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CheckpointConfig {
+    #[serde(default = "default_checkpoint_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_checkpoint_dir")]
+    pub directory: String,
+    #[serde(default = "default_max_checkpoints")]
+    pub max_per_session: usize,
+    #[serde(default = "default_auto_cleanup_days")]
+    pub auto_cleanup_days: u64,
 }
 
 fn default_max_read_bytes() -> usize {
     16384
+}
+
+fn default_checkpoint_enabled() -> bool {
+    true
+}
+
+fn default_checkpoint_dir() -> String {
+    ".checkpoints".to_string()
+}
+
+fn default_max_checkpoints() -> usize {
+    50
+}
+
+fn default_auto_cleanup_days() -> u64 {
+    30
+}
+
+impl Default for CheckpointConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_checkpoint_enabled(),
+            directory: default_checkpoint_dir(),
+            max_per_session: default_max_checkpoints(),
+            auto_cleanup_days: default_auto_cleanup_days(),
+        }
+    }
 }
 
 impl Default for FilesystemConfig {
@@ -62,6 +103,7 @@ impl Default for FilesystemConfig {
         Self {
             max_read_bytes: default_max_read_bytes(),
             allowed_directories: Vec::new(),
+            checkpoint: CheckpointConfig::default(),
         }
     }
 }

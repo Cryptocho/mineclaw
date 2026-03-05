@@ -1,4 +1,5 @@
 use thiserror::Error;
+use std::path::StripPrefixError;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -67,6 +68,15 @@ pub enum Error {
     #[error("Local tool execution error: {tool}: {message}")]
     LocalToolExecution { tool: String, message: String },
 
+    #[error("Checkpoint not found: {0}")]
+    CheckpointNotFound(String),
+
+    #[error("Checkpoint restore failed: {0}")]
+    CheckpointRestoreFailed(String),
+
+    #[error("Path prefix error: {0}")]
+    PathPrefix(#[from] StripPrefixError),
+
     #[error("Internal server error")]
     Internal,
 }
@@ -95,6 +105,9 @@ impl axum::response::IntoResponse for Error {
             Error::FileTooLarge(_, _) => axum::http::StatusCode::PAYLOAD_TOO_LARGE,
             Error::LocalToolNotFound(_) => axum::http::StatusCode::NOT_FOUND,
             Error::LocalToolExecution { .. } => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Error::CheckpointNotFound(_) => axum::http::StatusCode::NOT_FOUND,
+            Error::CheckpointRestoreFailed(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Error::PathPrefix(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             Error::Internal => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
         };
 

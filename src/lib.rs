@@ -3,6 +3,7 @@
 //! 核心库模块
 
 pub mod api;
+pub mod checkpoint;
 pub mod config;
 pub mod error;
 pub mod llm;
