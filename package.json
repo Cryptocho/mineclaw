@@ -1,6 +1,0 @@
-{
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
-    "minimist": "^1.2.8"
-  }
-}

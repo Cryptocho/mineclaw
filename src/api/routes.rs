@@ -7,7 +7,6 @@ use crate::state::AppState;
 pub fn create_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(handlers::health))
-        .route("/api/config", get(handlers::get_config).put(handlers::update_config))
         .route("/api/messages", post(handlers::send_message))
         .route("/api/messages/stream", post(handlers::send_message_stream))
         .route("/api/sessions", get(handlers::list_sessions))
@@ -15,5 +14,12 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/sessions/{id}", delete(handlers::delete_session))
         .route("/api/sessions/{id}/messages", get(handlers::list_messages))
         .route("/api/sessions/{id}/stream", get(handlers::session_stream))
+        // 管理 API
+        .route("/api/tools", get(handlers::list_tools))
+        .route("/api/mcp/servers", get(handlers::list_mcp_servers))
+        .route(
+            "/api/mcp/servers/{name}/restart",
+            post(handlers::restart_mcp_server),
+        )
         .with_state(state)
 }

@@ -1,4 +1,3 @@
-# Rust
 /target
 /config/mineclaw.toml
 /config/master.key
@@ -24,4 +23,3 @@ venv/
 # Logs & Temp
 *.log
 *.tmp
-verify_mineclaw.ps1

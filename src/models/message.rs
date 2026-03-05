@@ -98,6 +98,46 @@ pub struct ListMessagesResponse {
     pub messages: Vec<Message>,
 }
 
+// ==================== 管理 API 数据结构 ====================
+
+/// 工具信息（用于列表 API）
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolInfo {
+    pub name: String,
+    pub description: String,
+    pub server_name: String,
+    pub input_schema: serde_json::Value,
+}
+
+/// 工具列表响应
+#[derive(Debug, Serialize)]
+pub struct ListToolsResponse {
+    pub tools: Vec<ToolInfo>,
+}
+
+/// MCP 服务器信息
+#[derive(Debug, Clone, Serialize)]
+pub struct McpServerInfo {
+    pub name: String,
+    pub status: crate::mcp::ServerStatus,
+    pub tool_count: usize,
+    pub uptime_seconds: Option<u64>,
+    pub last_health_check: Option<DateTime<Utc>>,
+}
+
+/// MCP 服务器列表响应
+#[derive(Debug, Serialize)]
+pub struct ListMcpServersResponse {
+    pub servers: Vec<McpServerInfo>,
+}
+
+/// 重启 MCP 服务器响应
+#[derive(Debug, Serialize)]
+pub struct RestartMcpServerResponse {
+    pub success: bool,
+    pub message: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

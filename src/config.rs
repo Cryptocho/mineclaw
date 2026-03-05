@@ -1,10 +1,8 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::security::SecurityManager;
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     pub server: ServerConfig,
     pub llm: LlmConfig,
@@ -12,13 +10,13 @@ pub struct Config {
     pub mcp: Option<McpConfig>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct LlmConfig {
     pub provider: String,
     pub api_key: String,
@@ -28,14 +26,14 @@ pub struct LlmConfig {
     pub temperature: f64,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct McpConfig {
     pub enabled: bool,
     #[serde(default)]
     pub servers: Vec<McpServerConfig>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct McpServerConfig {
     pub name: String,
     pub command: String,
@@ -68,11 +66,9 @@ impl Default for Config {
 impl Config {
     pub fn load() -> crate::error::Result<Self> {
         let config_path = Self::get_config_path()?;
-        let config_dir = config_path.parent().unwrap_or_else(|| std::path::Path::new("."));
 
         let mut settings = config::Config::builder();
 
-        // 加载默认配置...
         let default_config = Config::default();
         settings = settings
             .set_default("server.host", default_config.server.host)
@@ -93,45 +89,20 @@ impl Config {
             .map_err(crate::error::Error::Config)?;
 
         if config_path.exists() {
-            settings = settings.add_source(config::File::from(config_path.clone()));
+            settings = settings.add_source(config::File::from(config_path));
         }
 
         let settings = settings
             .add_source(config::Environment::with_prefix("MINECLAW").separator("__"))
             .build()?;
 
-        let mut config = settings.try_deserialize::<Config>()?;
-
-        // 尝试解密 API Key
-        if !config.llm.api_key.is_empty() {
-            let security = SecurityManager::new(config_dir);
-            config.llm.api_key = security.decrypt(&config.llm.api_key)?;
-        }
+        let config = settings.try_deserialize::<Config>()?;
 
         Ok(config)
     }
 
     fn get_config_path() -> crate::error::Result<PathBuf> {
         Ok(PathBuf::from("config/mineclaw.toml"))
-    }
-
-    pub fn save(&self) -> crate::error::Result<()> {
-        let config_path = Self::get_config_path()?;
-        let config_dir = config_path.parent().unwrap_or_else(|| std::path::Path::new("."));
-
-        // 克隆一份用于保存，以便修改 API Key
-        let mut config_to_save = self.clone();
-
-        // 加密 API Key
-        if !config_to_save.llm.api_key.is_empty() {
-            let security = SecurityManager::new(config_dir);
-            config_to_save.llm.api_key = security.encrypt(&config_to_save.llm.api_key)?;
-        }
-
-        let toml_string = toml::to_string(&config_to_save)
-            .map_err(|e| crate::error::Error::Config(config::ConfigError::Foreign(Box::new(e))))?;
-        std::fs::write(config_path, toml_string)?;
-        Ok(())
     }
 }
 
