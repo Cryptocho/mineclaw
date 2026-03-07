@@ -1,6 +1,8 @@
+use crate::encryption::EncryptionManager;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use tracing::info;
 
 /// Checkpoint 配置
 #[derive(Debug, Deserialize, Clone)]
@@ -42,10 +44,16 @@ pub struct Config {
     pub checkpoint: CheckpointConfig,
     #[serde(default = "default_agentfs_db_path")]
     pub agentfs_db_path: String,
+    pub encryption: Option<EncryptionConfig>,
 }
 
 fn default_agentfs_db_path() -> String {
     "data/mineclaw.db".to_string()
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct EncryptionConfig {
+    // 加密密钥通过环境变量 MINECLAW_ENCRYPTION_KEY 提供，不需要在文件中配置
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -121,6 +129,7 @@ impl Default for Config {
             filesystem: FilesystemConfig::default(),
             checkpoint: CheckpointConfig::default(),
             agentfs_db_path: default_agentfs_db_path(),
+            encryption: None,
         }
     }
 }
@@ -160,7 +169,34 @@ impl Config {
             .add_source(config::Environment::with_prefix("MINECLAW").separator("__"))
             .build()?;
 
-        let config = settings.try_deserialize::<Config>()?;
+        let mut config = settings.try_deserialize::<Config>()?;
+
+        // 尝试自动解密敏感字段
+        if config.llm.api_key.starts_with("encrypted:") {
+            let key = std::env::var("MINECLAW_ENCRYPTION_KEY").map_err(|_| {
+                crate::error::Error::Config(config::ConfigError::Message(
+                    "Encrypted API Key detected but MINECLAW_ENCRYPTION_KEY is missing".to_string(),
+                ))
+            })?;
+
+            let manager = EncryptionManager::new(&key).map_err(|e| {
+                crate::error::Error::Config(config::ConfigError::Message(format!(
+                    "Invalid encryption key: {}",
+                    e
+                )))
+            })?;
+
+            let cipher_text = config.llm.api_key.trim_start_matches("encrypted:");
+            let plain_text = manager.decrypt(cipher_text).map_err(|e| {
+                crate::error::Error::Config(config::ConfigError::Message(format!(
+                    "Failed to decrypt LLM API Key: {}",
+                    e
+                )))
+            })?;
+
+            info!("Successfully decrypted LLM API Key");
+            config.llm.api_key = plain_text;
+        }
 
         Ok(config)
     }

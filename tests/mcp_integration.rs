@@ -116,7 +116,7 @@ async fn test_mcp_tool_call_integration() {
 
     let mut manager = McpServerManager::new();
 
-    if let Ok(_) = manager.start_server(&server_config).await {
+    if manager.start_server(&server_config).await.is_ok() {
         println!("MCP server started, testing tool calls...");
 
         // 测试 1: 使用管理器直接调用 echo 工具

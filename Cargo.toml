@@ -11,6 +11,12 @@ path = "src/lib.rs"
 name = "mineclaw"
 path = "src/main.rs"
 
+[dev-dependencies]
+temp-env = "0.3"
+hex = "0.4"
+assert_cmd = "2.0"
+predicates = "3.1"
+
 [dependencies]
 axum = "0.8.8"
 tokio = { version = "1.50.0", features = ["full"] }
@@ -37,3 +43,9 @@ tempfile = "3.10"
 pathdiff = "0.2"
 agentfs = "0.2.0"
 agentsql = { version = "0.2.0", features = ["sqlite"] }
+
+# Encryption
+aes-gcm = "0.10"
+rand = "0.8"
+base64 = "0.22"
+zeroize = { version = "1.7", features = ["derive"] }
