@@ -555,10 +555,7 @@ mod tests {
     }
 
     fn create_test_config(enabled: bool) -> CheckpointConfig {
-        CheckpointConfig {
-            enabled,
-            checkpoint_directory: "/test/checkpoints".to_string(),
-        }
+        CheckpointConfig { enabled }
     }
 
     async fn create_test_file(
@@ -580,10 +577,6 @@ mod tests {
         let manager = CheckpointManager::new(agent_fs.clone(), config.clone());
 
         assert_eq!(manager.config().enabled, config.enabled);
-        assert_eq!(
-            manager.config().checkpoint_directory,
-            config.checkpoint_directory
-        );
     }
 
     #[tokio::test]

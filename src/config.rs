@@ -11,24 +11,36 @@ pub struct CheckpointConfig {
     /// 是否启用 checkpoint
     #[serde(default = "default_checkpoint_enabled")]
     pub enabled: bool,
-    /// Checkpoint 存储目录（agentfs 路径）
-    #[serde(default = "default_checkpoint_directory")]
-    pub checkpoint_directory: String,
 }
 
 fn default_checkpoint_enabled() -> bool {
     true
 }
 
-fn default_checkpoint_directory() -> String {
-    ".checkpoints".to_string()
-}
-
 impl Default for CheckpointConfig {
     fn default() -> Self {
         Self {
             enabled: default_checkpoint_enabled(),
-            checkpoint_directory: default_checkpoint_directory(),
+        }
+    }
+}
+
+/// 数据存储配置
+#[derive(Debug, Deserialize, Clone)]
+pub struct DataConfig {
+    /// 数据存储根目录
+    #[serde(default = "default_data_path")]
+    pub path: String,
+}
+
+fn default_data_path() -> String {
+    "data".to_string()
+}
+
+impl Default for DataConfig {
+    fn default() -> Self {
+        Self {
+            path: default_data_path(),
         }
     }
 }
@@ -43,13 +55,15 @@ pub struct Config {
     pub filesystem: FilesystemConfig,
     #[serde(default)]
     pub checkpoint: CheckpointConfig,
+    #[serde(default)]
+    pub data: DataConfig,
     #[serde(default = "default_agentfs_db_path")]
     pub agentfs_db_path: String,
     pub encryption: Option<EncryptionConfig>,
 }
 
 fn default_agentfs_db_path() -> String {
-    "data/mineclaw.db".to_string()
+    "data/checkpoint/agentfs.db".to_string()
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -129,6 +143,7 @@ impl Default for Config {
             mcp: None,
             filesystem: FilesystemConfig::default(),
             checkpoint: CheckpointConfig::default(),
+            data: DataConfig::default(),
             agentfs_db_path: default_agentfs_db_path(),
             encryption: None,
         }
@@ -159,6 +174,8 @@ impl Config {
             .map_err(crate::error::Error::Config)?
             .set_default("llm.temperature", default_config.llm.temperature)
             .map_err(crate::error::Error::Config)?
+            .set_default("data.path", default_config.data.path)
+            .map_err(crate::error::Error::Config)?
             .set_default("agentfs_db_path", default_config.agentfs_db_path)
             .map_err(crate::error::Error::Config)?;
 
@@ -180,7 +197,7 @@ impl Config {
             // 情况1：已经是加密的 API Key，需要解密
             let key = encryption_key_env.ok_or_else(|| {
                 crate::error::Error::Config(config::ConfigError::Message(
-                    "Encrypted API Key detected but MINECLAW_ENCRYPTION_KEY is missing".to_string(),
+                    "Encrypted API Key detected but MINECLAW_ENCRYPTION_KEY is missing, please make sure it is in your env".to_string(),
                 ))
             })?;
 
