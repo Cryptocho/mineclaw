@@ -15,8 +15,7 @@ pub mod filesystem;
 pub mod registry;
 
 pub use self::checkpoint::{
-    CheckpointTools, CreateCheckpointTool, DeleteCheckpointTool, ListCheckpointsTool,
-    RestoreCheckpointTool,
+    CheckpointTools, DeleteCheckpointTool, ListCheckpointsTool, RestoreCheckpointTool,
 };
 pub use registry::LocalToolRegistry;
 

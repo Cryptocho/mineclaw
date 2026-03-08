@@ -235,8 +235,14 @@ MineClaw 将通过 **Agent Client Protocol (ACP)** 与用户习惯的 IDE 无缝
 ### Phase 4: 多 Agent 基础架构 📋
 - [详细文档](./PHASE4_planning.md) (待编写)
 - **目标**：建立多 Agent 运行的基础框架，让单个 Agent 能够正常工作并支持基本管理
+- **执行原则**：按照 Baby Steps™ 方法论，分优先级逐步实现，先验证核心概念，再扩展功能
 
-#### Phase 4.1: Agent 基础定义与生命周期管理
+---
+
+#### 🎯 第一优先级：核心基础设施
+**目标**：建立 Agent 运行的最小可行基础
+
+##### Phase 4.1: Agent 基础定义与生命周期管理
 - Agent 核心数据结构定义
   - 唯一标识
   - 名称与角色
@@ -253,7 +259,7 @@ MineClaw 将通过 **Agent Client Protocol (ACP)** 与用户习惯的 IDE 无缝
   - 支持不同模型型号配置
   - 配置热加载（可选）
 
-#### Phase 4.2: 消息总线基础
+##### Phase 4.2: 消息总线基础
 - 基础消息传递机制
   - 消息定义与序列化
   - 消息 ID 生成与追踪
@@ -263,7 +269,31 @@ MineClaw 将通过 **Agent Client Protocol (ACP)** 与用户习惯的 IDE 无缝
   - 消息确认与超时处理
   - 基础的错误重试
 
-#### Phase 4.3: 上下文管理 Agent（基础版）
+##### Phase 4.3: Checkpoint 与会话增强
+- Session 生命周期完善
+  - Session 创建、激活、归档、删除
+  - Session 与 Checkpoint 强关联
+- Checkpoint 管理增强
+  - 跟随 Session 生命周期的 Checkpoint 管理
+  - Checkpoint 归档与清理策略
+  - AgentFS 集成优化
+
+---
+
+#### 🏗️ 第二优先级：功能模块
+**目标**：在核心基础设施之上，添加关键功能
+
+##### Phase 4.4: 工具掩码基础机制
+- 工具权限管理
+  - 工具可用列表配置
+  - 按工具级别的掩码控制
+  - MCP 工具与本地工具分类管理
+- Agent 工具分配
+  - 为 Agent 配置可用工具集
+  - 工具调用权限检查
+  - 终端工具特殊处理（全开放）
+
+##### Phase 4.5: 上下文管理 Agent（基础版）
 - 基础上下文管理能力
   - 上下文接收与存储
   - 基础的上下文长度监控
@@ -276,26 +306,7 @@ MineClaw 将通过 **Agent Client Protocol (ACP)** 与用户习惯的 IDE 无缝
   - 转交判断策略模板
   - 模板版本管理
 
-#### Phase 4.4: 工具掩码基础机制
-- 工具权限管理
-  - 工具可用列表配置
-  - 按工具级别的掩码控制
-  - MCP 工具与本地工具分类管理
-- Agent 工具分配
-  - 为 Agent 配置可用工具集
-  - 工具调用权限检查
-  - 终端工具特殊处理（全开放）
-
-#### Phase 4.5: Checkpoint 与会话增强
-- Session 生命周期完善
-  - Session 创建、激活、归档、删除
-  - Session 与 Checkpoint 强关联
-- Checkpoint 管理增强
-  - 跟随 Session 生命周期的 Checkpoint 管理
-  - Checkpoint 归档与清理策略
-  - AgentFS 集成优化
-
-#### Phase 4.6: 基础 API 扩展
+##### Phase 4.6: 基础 API 扩展
 - Agent 管理 API
   - 创建、查看、删除 Agent
   - Agent 状态查询
@@ -304,7 +315,12 @@ MineClaw 将通过 **Agent Client Protocol (ACP)** 与用户习惯的 IDE 无缝
   - Session 历史查询
 - 简单的单 Agent 任务执行流验证
 
-#### Phase 4.7: ACP (Agent Client Protocol) 集成
+---
+
+#### 🔌 第三优先级：集成
+**目标**：与外部系统和协议集成
+
+##### Phase 4.7: ACP (Agent Client Protocol) 集成
 - ACP 基础依赖
   - 引入 `agent-client-protocol` crate
   - 学习和理解 ACP 协议规范

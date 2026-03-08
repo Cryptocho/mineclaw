@@ -3,7 +3,6 @@
 //! 提供给 LLM 使用的 checkpoint 管理工具。
 
 use crate::error::{Error, Result};
-use crate::models::checkpoint::*;
 use crate::tools::{LocalTool, ToolContext};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -12,23 +11,6 @@ use std::sync::Arc;
 use tracing::{debug, info};
 
 // ==================== 工具参数和结果结构 ====================
-
-/// 创建 checkpoint 参数
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateCheckpointToolParams {
-    /// 描述（可选）
-    pub description: Option<String>,
-    /// 受影响的文件路径列表（可选）
-    pub affected_files: Option<Vec<String>>,
-}
-
-/// 创建 checkpoint 结果
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateCheckpointToolResult {
-    pub success: bool,
-    pub checkpoint_id: String,
-    pub message: String,
-}
 
 /// 列出 checkpoints 参数
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,70 +71,6 @@ pub struct DeleteCheckpointToolResult {
 }
 
 // ==================== 工具实现 ====================
-
-/// 创建 checkpoint 工具
-pub struct CreateCheckpointTool;
-
-#[async_trait]
-impl LocalTool for CreateCheckpointTool {
-    fn name(&self) -> &str {
-        "create_checkpoint"
-    }
-
-    fn description(&self) -> &str {
-        "创建一个新的 checkpoint，保存当前的会话状态和文件状态"
-    }
-
-    fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "description": {
-                    "type": "string",
-                    "description": "Checkpoint 的描述，说明这个 checkpoint 的用途"
-                },
-                "affected_files": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "description": "受影响的文件路径列表（可选）"
-                }
-            },
-            "required": []
-        })
-    }
-
-    async fn call(&self, arguments: Value, context: ToolContext) -> Result<Value> {
-        debug!("CreateCheckpointTool called");
-
-        let params: CreateCheckpointToolParams = serde_json::from_value(arguments)
-            .map_err(|e| Error::InvalidInput(format!("Invalid arguments: {}", e)))?;
-
-        let Some(checkpoint_manager) = &context.checkpoint_manager else {
-            return Err(Error::Checkpoint("Checkpoint manager not available".into()));
-        };
-
-        let checkpoint = checkpoint_manager
-            .create_checkpoint(
-                &context.session,
-                params.description,
-                CheckpointType::Manual,
-                params.affected_files,
-            )
-            .await?;
-
-        let result = CreateCheckpointToolResult {
-            success: true,
-            checkpoint_id: checkpoint.id.clone(),
-            message: format!("Checkpoint created successfully with ID: {}", checkpoint.id),
-        };
-
-        info!(checkpoint_id = %checkpoint.id, "Checkpoint created via tool");
-
-        serde_json::to_value(result).map_err(Error::SerdeJson)
-    }
-}
 
 /// 列出 checkpoints 工具
 pub struct ListCheckpointsTool;
@@ -362,7 +280,6 @@ pub struct CheckpointTools;
 impl CheckpointTools {
     /// 注册所有 checkpoint 工具到注册表
     pub fn register_all(registry: &mut crate::tools::LocalToolRegistry) {
-        registry.register(Arc::new(CreateCheckpointTool));
         registry.register(Arc::new(ListCheckpointsTool));
         registry.register(Arc::new(RestoreCheckpointTool));
         registry.register(Arc::new(DeleteCheckpointTool));

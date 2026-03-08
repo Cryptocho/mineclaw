@@ -271,7 +271,10 @@ async fn test_search_file() {
         .await
         .unwrap();
 
-    let matches = result["matches"].as_array().unwrap();
+    let results = result["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1);
+    let file_result = &results[0];
+    let matches = file_result["matches"].as_array().unwrap();
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0]["line_number"].as_u64().unwrap(), 1);
 
@@ -289,7 +292,10 @@ async fn test_search_file() {
         .await
         .unwrap();
 
-    let matches = result["matches"].as_array().unwrap();
+    let results = result["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1);
+    let file_result = &results[0];
+    let matches = file_result["matches"].as_array().unwrap();
     assert_eq!(matches.len(), 2);
 }
 

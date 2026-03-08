@@ -22,10 +22,10 @@ fn test_config_decryption() {
         || {
             // 4. 加载配置 (应该自动解密)
             let config = Config::load().expect("Failed to load config");
-            
+
             // 5. 验证
             assert_eq!(config.llm.api_key, original_api_key);
-        }
+        },
     );
 }
 
@@ -49,12 +49,15 @@ fn test_config_decryption_missing_key() {
         || {
             // 4. 加载配置 (应该失败)
             let result = Config::load();
-            
+
             // 5. 验证错误
             assert!(result.is_err());
             let err = result.unwrap_err();
-            assert!(err.to_string().contains("MINECLAW_ENCRYPTION_KEY is missing"));
-        }
+            assert!(
+                err.to_string()
+                    .contains("MINECLAW_ENCRYPTION_KEY is missing")
+            );
+        },
     );
 }
 
@@ -68,12 +71,12 @@ fn test_config_decryption_invalid_key() {
         || {
             // 2. 加载配置 (应该失败)
             let result = Config::load();
-            
+
             // 3. 验证错误
             assert!(result.is_err());
             let err = result.unwrap_err();
             assert!(err.to_string().contains("Invalid encryption key"));
-        }
+        },
     );
 }
 
@@ -81,7 +84,7 @@ fn test_config_decryption_invalid_key() {
 fn test_config_plaintext_fallback() {
     let plain_key = "sk-plain-text-key";
     let key = EncryptionManager::generate_key();
-    
+
     with_vars(
         vec![
             ("MINECLAW_ENCRYPTION_KEY", Some(key.as_str())),
@@ -90,9 +93,9 @@ fn test_config_plaintext_fallback() {
         || {
             // 2. 加载配置
             let config = Config::load().expect("Should load plaintext config successfully");
-            
+
             // 3. 验证 (原样读取)
             assert_eq!(config.llm.api_key, plain_key);
-        }
+        },
     );
 }

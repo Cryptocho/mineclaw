@@ -110,11 +110,50 @@ async fn maybe_create_checkpoint(
     Ok(())
 }
 
+/// 在单个文件中搜索模式
+fn search_in_file(
+    file_path: &Path,
+    display_path: &str,
+    pattern: &regex::Regex,
+) -> Option<FileSearchResult> {
+    match std::fs::read_to_string(file_path) {
+        Ok(content) => {
+            let mut matches = Vec::new();
+            for (line_number, line) in content.lines().enumerate() {
+                if pattern.is_match(line) {
+                    matches.push(SearchMatch {
+                        file_path: display_path.to_string(),
+                        line_number: line_number + 1,
+                        content: line.to_string(),
+                    });
+                }
+            }
+
+            if !matches.is_empty() {
+                Some(FileSearchResult {
+                    file_path: display_path.to_string(),
+                    matches,
+                })
+            } else {
+                None
+            }
+        }
+        Err(e) => {
+            warn!("Failed to read file {}: {}", file_path.display(), e);
+            None
+        }
+    }
+}
+
 // ==================== Tool Parameters and Results ====================
 
 #[derive(Debug, Deserialize)]
 pub struct ReadFileParams {
     pub path: String,
+    #[serde(default)]
+    pub start_line: Option<usize>,
+    #[serde(default)]
+    pub end_line: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -122,6 +161,9 @@ pub struct ReadFileResult {
     pub content: String,
     pub truncated: bool,
     pub total_bytes: usize,
+    pub total_lines: usize,
+    pub start_line: Option<usize>,
+    pub end_line: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -171,17 +213,28 @@ pub struct SearchFileParams {
     pub pattern: String,
     #[serde(default)]
     pub case_sensitive: Option<bool>,
+    #[serde(default)]
+    pub recursive: Option<bool>,
+    #[serde(default)]
+    pub file_pattern: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct SearchMatch {
+    pub file_path: String,
     pub line_number: usize,
     pub content: String,
 }
 
 #[derive(Debug, Serialize)]
-pub struct SearchFileResult {
+pub struct FileSearchResult {
+    pub file_path: String,
     pub matches: Vec<SearchMatch>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SearchFileResult {
+    pub results: Vec<FileSearchResult>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -282,6 +335,16 @@ impl LocalTool for ReadFileTool {
                 "path": {
                     "type": "string",
                     "description": "Path to the file to read"
+                },
+                "start_line": {
+                    "type": "integer",
+                    "description": "Starting line number (1-based, inclusive). If not specified, reads from the beginning.",
+                    "minimum": 1
+                },
+                "end_line": {
+                    "type": "integer",
+                    "description": "Ending line number (1-based, inclusive). If not specified, reads to the end.",
+                    "minimum": 1
                 }
             },
             "required": ["path"]
@@ -297,28 +360,56 @@ impl LocalTool for ReadFileTool {
         let metadata = std::fs::metadata(&path)?;
         let total_bytes = metadata.len() as usize;
 
-        let content = if total_bytes > config.max_read_bytes {
+        // Read all content first
+        let full_content = std::fs::read_to_string(&path)?;
+        let all_lines: Vec<&str> = full_content.lines().collect();
+        let total_lines = all_lines.len();
+
+        // Determine line range
+        let start_line = params.start_line.unwrap_or(1);
+        let end_line = params.end_line.unwrap_or(total_lines);
+
+        // Validate and adjust line numbers
+        let start_idx = if start_line > total_lines {
+            total_lines
+        } else if start_line < 1 {
+            1
+        } else {
+            start_line
+        } - 1; // Convert to 0-based index
+
+        let end_idx = if end_line > total_lines {
+            total_lines
+        } else if end_line < 1 {
+            1
+        } else {
+            end_line
+        }; // Exclusive in slice, so no -1 needed
+
+        let selected_lines = &all_lines[start_idx..end_idx];
+        let content = selected_lines.join("\n");
+
+        // Check if the selected content exceeds max_read_bytes
+        let truncated = content.len() > config.max_read_bytes;
+        let final_content = if truncated {
             warn!(
                 path = %path.display(),
-                file_size = total_bytes,
+                content_size = content.len(),
                 max_size = config.max_read_bytes,
-                "File too large, truncating"
+                "Selected content too large, truncating"
             );
-            let mut file = std::fs::File::open(&path)?;
-            let mut buffer = vec![0u8; config.max_read_bytes];
-            use std::io::Read;
-            let bytes_read = file.read(&mut buffer)?;
-            String::from_utf8_lossy(&buffer[..bytes_read]).to_string()
+            content.chars().take(config.max_read_bytes).collect()
         } else {
-            std::fs::read_to_string(&path)?
+            content
         };
 
-        let truncated = total_bytes > config.max_read_bytes;
-
         let result = ReadFileResult {
-            content,
+            content: final_content,
             truncated,
             total_bytes,
+            total_lines,
+            start_line: params.start_line,
+            end_line: params.end_line,
         };
 
         Ok(serde_json::to_value(result)?)
@@ -534,7 +625,7 @@ impl LocalTool for SearchFileTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to the file to search"
+                    "description": "Path to the file or directory to search"
                 },
                 "pattern": {
                     "type": "string",
@@ -544,6 +635,15 @@ impl LocalTool for SearchFileTool {
                     "type": "boolean",
                     "description": "Whether the search is case-sensitive",
                     "default": true
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "Whether to search recursively in directories",
+                    "default": false
+                },
+                "file_pattern": {
+                    "type": "string",
+                    "description": "Optional glob pattern to filter files (e.g., '*.rs', '*.txt')"
                 }
             },
             "required": ["path", "pattern"]
@@ -556,26 +656,70 @@ impl LocalTool for SearchFileTool {
 
         let path = normalize_and_validate_path(&params.path, &config.allowed_directories)?;
 
-        let content = std::fs::read_to_string(&path)?;
-
         let pattern = if params.case_sensitive.unwrap_or(true) {
             regex::Regex::new(&params.pattern)?
         } else {
             regex::Regex::new(&format!("(?i){}", params.pattern))?
         };
 
-        let mut matches = Vec::new();
+        let mut file_results = Vec::new();
 
-        for (line_number, line) in content.lines().enumerate() {
-            if pattern.is_match(line) {
-                matches.push(SearchMatch {
-                    line_number: line_number + 1,
-                    content: line.to_string(),
-                });
+        // Check if path is a file or directory
+        if path.is_file() {
+            // Search single file
+            if let Some(file_matches) = search_in_file(&path, &params.path, &pattern) {
+                file_results.push(file_matches);
+            }
+        } else if path.is_dir() {
+            // Search directory
+            let recursive = params.recursive.unwrap_or(false);
+
+            // Create file pattern matcher if provided
+            let file_pattern_matcher = params
+                .file_pattern
+                .as_ref()
+                .and_then(|p| glob::Pattern::new(p).ok());
+
+            let walkdir_iter = if recursive {
+                walkdir::WalkDir::new(&path)
+            } else {
+                walkdir::WalkDir::new(&path).max_depth(1)
+            };
+
+            for entry in walkdir_iter {
+                let entry = entry?;
+                let entry_path = entry.path();
+
+                if entry_path.is_file() {
+                    // Check file pattern if provided
+                    if let Some(matcher) = &file_pattern_matcher
+                        && let Some(file_name) = entry_path.file_name()
+                        && !matcher.matches(&file_name.to_string_lossy())
+                    {
+                        continue;
+                    }
+
+                    // Calculate relative path for display
+                    let rel_path = if entry_path == path {
+                        params.path.clone()
+                    } else {
+                        let rel_to_base = entry_path.strip_prefix(&path).unwrap_or(entry_path);
+                        Path::new(&params.path)
+                            .join(rel_to_base)
+                            .to_string_lossy()
+                            .to_string()
+                    };
+
+                    if let Some(file_matches) = search_in_file(entry_path, &rel_path, &pattern) {
+                        file_results.push(file_matches);
+                    }
+                }
             }
         }
 
-        let result = SearchFileResult { matches };
+        let result = SearchFileResult {
+            results: file_results,
+        };
 
         Ok(serde_json::to_value(result)?)
     }

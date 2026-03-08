@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use mineclaw::encryption::EncryptionManager;
     use base64::Engine;
+    use mineclaw::encryption::EncryptionManager;
 
     #[test]
     fn test_encryption_manager_lifecycle() {
@@ -28,7 +28,7 @@ mod tests {
     fn test_invalid_key() {
         // 无效的 Base64
         assert!(EncryptionManager::new("invalid-base64!").is_err());
-        
+
         // 长度不对
         let short_key = base64::engine::general_purpose::STANDARD.encode(vec![0u8; 16]);
         assert!(EncryptionManager::new(&short_key).is_err());
@@ -48,20 +48,25 @@ mod tests {
         let key = EncryptionManager::generate_key();
         let manager = EncryptionManager::new(&key).unwrap();
         let plaintext = "secret-data";
-        
+
         let encrypted_base64 = manager.encrypt(plaintext).unwrap();
-        let mut encrypted_bytes = base64::engine::general_purpose::STANDARD.decode(&encrypted_base64).unwrap();
-        
+        let mut encrypted_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&encrypted_base64)
+            .unwrap();
+
         // GCM 密文结构: Nonce (12) + Ciphertext + Tag (16)
         // 修改最后一个字节 (Tag 的一部分)
         let last_index = encrypted_bytes.len() - 1;
         encrypted_bytes[last_index] ^= 0xFF; // Flip bits
-        
+
         let tampered_base64 = base64::engine::general_purpose::STANDARD.encode(&encrypted_bytes);
-        
+
         // 解密应该失败 (Tag mismatch)
         let result = manager.decrypt(&tampered_base64);
-        assert!(result.is_err(), "Decryption should fail when Tag is tampered");
+        assert!(
+            result.is_err(),
+            "Decryption should fail when Tag is tampered"
+        );
     }
 
     #[test]
@@ -69,13 +74,16 @@ mod tests {
         let key = EncryptionManager::generate_key();
         let manager = EncryptionManager::new(&key).unwrap();
         let plaintext = "same-data";
-        
+
         let enc1 = manager.encrypt(plaintext).unwrap();
         let enc2 = manager.encrypt(plaintext).unwrap();
-        
+
         // 即使明文相同，密文也必须不同 (因为 Nonce 不同)
-        assert_ne!(enc1, enc2, "Ciphertext must be different for same plaintext (Nonce reuse?)");
-        
+        assert_ne!(
+            enc1, enc2,
+            "Ciphertext must be different for same plaintext (Nonce reuse?)"
+        );
+
         // 解密都应该成功
         assert_eq!(manager.decrypt(&enc1).unwrap(), plaintext);
         assert_eq!(manager.decrypt(&enc2).unwrap(), plaintext);
