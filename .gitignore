@@ -1,12 +1,11 @@
 /target
 /config/mineclaw.toml
 /config/master.key
-**/*.rs.bk
+/data
+Cargo.lock
 
 # IDE
 .idea/
 .vscode/
 .clinerules/
 .trae/
-
-Cargo.lock

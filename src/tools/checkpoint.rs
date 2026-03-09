@@ -56,20 +56,6 @@ pub struct RestoreCheckpointToolResult {
     pub restored_files: Vec<String>,
 }
 
-/// 删除 checkpoint 参数
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeleteCheckpointToolParams {
-    /// Checkpoint ID
-    pub checkpoint_id: String,
-}
-
-/// 删除 checkpoint 结果
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeleteCheckpointToolResult {
-    pub success: bool,
-    pub message: String,
-}
-
 // ==================== 工具实现 ====================
 
 /// 列出 checkpoints 工具
@@ -218,60 +204,6 @@ impl LocalTool for RestoreCheckpointTool {
     }
 }
 
-/// 删除 checkpoint 工具
-pub struct DeleteCheckpointTool;
-
-#[async_trait]
-impl LocalTool for DeleteCheckpointTool {
-    fn name(&self) -> &str {
-        "delete_checkpoint"
-    }
-
-    fn description(&self) -> &str {
-        "删除指定的 checkpoint"
-    }
-
-    fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "checkpoint_id": {
-                    "type": "string",
-                    "description": "要删除的 checkpoint ID"
-                }
-            },
-            "required": ["checkpoint_id"]
-        })
-    }
-
-    async fn call(&self, arguments: Value, context: ToolContext) -> Result<Value> {
-        debug!("DeleteCheckpointTool called");
-
-        let params: DeleteCheckpointToolParams = serde_json::from_value(arguments)
-            .map_err(|e| Error::InvalidInput(format!("Invalid arguments: {}", e)))?;
-
-        let Some(checkpoint_manager) = &context.checkpoint_manager else {
-            return Err(Error::Checkpoint("Checkpoint manager not available".into()));
-        };
-
-        checkpoint_manager
-            .delete_checkpoint(&params.checkpoint_id)
-            .await?;
-
-        let result = DeleteCheckpointToolResult {
-            success: true,
-            message: format!("Checkpoint {} deleted successfully", params.checkpoint_id),
-        };
-
-        info!(
-            checkpoint_id = %params.checkpoint_id,
-            "Checkpoint deleted via tool"
-        );
-
-        serde_json::to_value(result).map_err(Error::SerdeJson)
-    }
-}
-
 // ==================== Checkpoint 工具注册 ====================
 
 /// Checkpoint 工具集合
@@ -282,6 +214,5 @@ impl CheckpointTools {
     pub fn register_all(registry: &mut crate::tools::LocalToolRegistry) {
         registry.register(Arc::new(ListCheckpointsTool));
         registry.register(Arc::new(RestoreCheckpointTool));
-        registry.register(Arc::new(DeleteCheckpointTool));
     }
 }
