@@ -206,6 +206,102 @@ impl CheckpointManager {
         Ok(deleted_count)
     }
 
+    /// 按保留策略清理过期的 Checkpoint
+    pub async fn cleanup_old_checkpoints(
+        &self,
+        session_id: &Uuid,
+        retain_count: usize,
+    ) -> Result<usize> {
+        let mut checkpoints = self.load_checkpoints_for_session(session_id).await?;
+
+        if checkpoints.len() <= retain_count {
+            return Ok(0);
+        }
+
+        // 按创建时间排序，最新的在前
+        checkpoints.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+        // 保留最新的 retain_count 个，删除其余的
+        let checkpoints_to_delete = &checkpoints[retain_count..];
+        let mut deleted_count = 0;
+
+        for checkpoint in checkpoints_to_delete {
+            // 不删除已归档的 Checkpoint
+            if checkpoint.is_archived() {
+                continue;
+            }
+
+            match self.delete_checkpoint(&checkpoint.id).await {
+                Ok(_) => deleted_count += 1,
+                Err(e) => {
+                    tracing::warn!(
+                        checkpoint_id = %checkpoint.id,
+                        error = %e,
+                        "Failed to delete checkpoint during cleanup"
+                    );
+                }
+            }
+        }
+
+        tracing::info!(
+            session_id = %session_id,
+            retain_count = %retain_count,
+            deleted_count = %deleted_count,
+            "Cleaned up old checkpoints"
+        );
+
+        Ok(deleted_count)
+    }
+
+    /// 按归档策略清理所有过期的 Checkpoint
+    pub async fn cleanup_all_old_checkpoints(
+        &self,
+        strategy: &crate::models::checkpoint::CheckpointArchivingStrategy,
+    ) -> Result<usize> {
+        let retain_count = strategy.retain_count.unwrap_or(10);
+
+        // 扫描所有会话的 Checkpoint
+        let session_keys = self
+            .agent_fs
+            .kv
+            .scan("checkpoints/")
+            .await
+            .map_err(|e| CheckpointError::AgentFS(e.to_string()))?;
+
+        let mut session_ids = std::collections::HashSet::new();
+
+        for session_key in session_keys {
+            if session_key.ends_with("/list.json")
+                && let Some(session_id_str) = session_key
+                    .strip_prefix("checkpoints/")
+                    .and_then(|s| s.strip_suffix("/list.json"))
+                && let Ok(session_id) = Uuid::parse_str(session_id_str)
+            {
+                session_ids.insert(session_id);
+            }
+        }
+
+        let mut total_deleted = 0;
+
+        for session_id in session_ids {
+            match self
+                .cleanup_old_checkpoints(&session_id, retain_count)
+                .await
+            {
+                Ok(count) => total_deleted += count,
+                Err(e) => {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        error = %e,
+                        "Failed to cleanup checkpoints for session"
+                    );
+                }
+            }
+        }
+
+        Ok(total_deleted)
+    }
+
     /// 收集文件信息
     async fn collect_file_infos(&self, paths: &[String]) -> Result<Vec<FileInfo>> {
         let mut infos = Vec::new();

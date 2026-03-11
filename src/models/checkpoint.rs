@@ -1,7 +1,82 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 use uuid::Uuid;
+
+// ============================================================================
+// CheckpointArchivingStrategy - Checkpoint 归档策略
+// ============================================================================
+
+/// Checkpoint 归档策略类型
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CheckpointArchivingStrategyType {
+    /// Session 归档时归档
+    OnSessionArchive,
+    /// 手动触发
+    Manual,
+    /// 定期归档
+    Periodic,
+}
+
+impl fmt::Display for CheckpointArchivingStrategyType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OnSessionArchive => write!(f, "OnSessionArchive"),
+            Self::Manual => write!(f, "Manual"),
+            Self::Periodic => write!(f, "Periodic"),
+        }
+    }
+}
+
+/// Checkpoint 归档策略
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CheckpointArchivingStrategy {
+    /// 策略类型
+    pub strategy_type: CheckpointArchivingStrategyType,
+    /// 保留的 Checkpoint 数量（可选）
+    pub retain_count: Option<usize>,
+    /// 定期归档的间隔（秒，仅 Periodic 策略需要）
+    pub periodic_interval_seconds: Option<u64>,
+}
+
+impl CheckpointArchivingStrategy {
+    /// 创建默认策略（Session 归档时归档，保留所有）
+    pub fn new() -> Self {
+        Self {
+            strategy_type: CheckpointArchivingStrategyType::OnSessionArchive,
+            retain_count: None,
+            periodic_interval_seconds: None,
+        }
+    }
+
+    /// 创建保留指定数量的策略
+    pub fn with_retain_count(
+        strategy_type: CheckpointArchivingStrategyType,
+        retain_count: usize,
+    ) -> Self {
+        Self {
+            strategy_type,
+            retain_count: Some(retain_count),
+            periodic_interval_seconds: None,
+        }
+    }
+
+    /// 创建定期归档策略
+    pub fn periodic(interval_seconds: u64, retain_count: Option<usize>) -> Self {
+        Self {
+            strategy_type: CheckpointArchivingStrategyType::Periodic,
+            retain_count,
+            periodic_interval_seconds: Some(interval_seconds),
+        }
+    }
+}
+
+impl Default for CheckpointArchivingStrategy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Checkpoint 类型
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -44,6 +119,11 @@ pub struct Checkpoint {
     pub parent_id: Option<String>,
     /// 元数据
     pub metadata: Option<serde_json::Value>,
+    /// 是否已归档
+    #[serde(default)]
+    pub is_archived: bool,
+    /// 归档时间（可选）
+    pub archived_at: Option<DateTime<Utc>>,
 }
 
 impl Checkpoint {
@@ -62,7 +142,22 @@ impl Checkpoint {
             affected_files: Vec::new(),
             parent_id: None,
             metadata: None,
+            is_archived: false,
+            archived_at: None,
         }
+    }
+
+    /// 归档 Checkpoint
+    pub fn archive(&mut self) {
+        if !self.is_archived {
+            self.is_archived = true;
+            self.archived_at = Some(Utc::now());
+        }
+    }
+
+    /// 检查是否已归档
+    pub fn is_archived(&self) -> bool {
+        self.is_archived
     }
 
     /// 添加受影响的文件

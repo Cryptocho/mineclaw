@@ -114,7 +114,7 @@ pub async fn handle_stream_request(
         let mut session = session;
         let user_message =
             crate::models::Message::new(session_id, crate::models::MessageRole::User, content);
-        session.add_message(user_message);
+        let _ = session.add_message(user_message);
 
         // 保存会话
         let _ = state.session_repo.update(session.clone()).await;
@@ -133,7 +133,7 @@ pub async fn handle_stream_request(
                     // 更新会话
                     if let Some(mut session) = state_clone.session_repo.get(&session_id).await {
                         for msg in intermediate_messages {
-                            session.add_message(msg);
+                            let _ = session.add_message(msg);
                         }
                         let _ = state_clone.session_repo.update(session).await;
                     }

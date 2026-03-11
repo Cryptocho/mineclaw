@@ -38,7 +38,7 @@ pub async fn send_message(
     let user_message_id = user_message.id;
 
     let mut session = session;
-    session.add_message(user_message);
+    let _ = session.add_message(user_message);
 
     info!("Running tool coordinator");
     let (assistant_response, intermediate_messages) =
@@ -50,7 +50,7 @@ pub async fn send_message(
 
     // 添加中间消息（工具调用和结果，以及中间的 Assistant 消息）到会话
     for msg in intermediate_messages {
-        session.add_message(msg);
+        let _ = session.add_message(msg);
     }
 
     // 注意：不再额外添加最终的助手回复

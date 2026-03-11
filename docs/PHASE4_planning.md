@@ -558,25 +558,25 @@
 ### Phase 4.3: Checkpoint 与会话增强
 
 #### 任务清单
-- [ ] 回顾现有的 Checkpoint 实现
-- [ ] 回顾现有的 Session 模型
-- [ ] 定义 SessionState 枚举
-- [ ] 增强 Session 结构（关联总控）
-- [ ] 定义 Session 生命周期事件
-- [ ] 实现 Session 创建流程
-- [ ] 实现 Session 激活流程
-- [ ] 实现 Session 归档流程
-- [ ] 实现 Session 删除流程
-- [ ] 实现 Session 与总控的关联
-- [ ] 实现 Session 与 Checkpoint 的强关联
-- [ ] 定义 Checkpoint 归档策略
-- [ ] 实现 Checkpoint 跟随 Session 生命周期
-- [ ] 实现 Checkpoint 清理策略
-- [ ] 优化 AgentFS 集成
-- [ ] 定义 SessionRepository
-- [ ] 编写单元测试
-- [ ] 编写集成测试
-- [ ] 验证验收清单
+- [x] 回顾现有的 Checkpoint 实现
+- [x] 回顾现有的 Session 模型
+- [x] 定义 SessionState 枚举
+- [x] 增强 Session 结构（关联总控）
+- [x] 定义 Session 生命周期事件
+- [x] 实现 Session 创建流程
+- [x] 实现 Session 激活流程
+- [x] 实现 Session 归档流程
+- [x] 实现 Session 删除流程
+- [x] 实现 Session 与总控的关联
+- [x] 实现 Session 与 Checkpoint 的强关联
+- [x] 定义 Checkpoint 归档策略
+- [x] 实现 Checkpoint 跟随 Session 生命周期
+- [x] 实现 Checkpoint 清理策略
+- [x] 优化 AgentFS 集成
+- [x] 定义 SessionRepository
+- [x] 编写单元测试
+- [x] 编写集成测试
+- [x] 验证验收清单
 
 #### 数据结构设计
 
@@ -714,24 +714,27 @@
 - 回归测试：确保现有功能不受影响
 
 #### 验收标准
-- [ ] 可以创建 Session，初始状态为 Draft
-- [ ] Session 状态机所有合法转换都能正常工作
-- [ ] 非法状态转换被正确拒绝
-- [ ] 可以将 Session 关联到总控
-- [ ] 可以解绑总控
-- [ ] Session 创建时自动创建初始 Checkpoint
-- [ ] Session 状态变化时自动创建 Checkpoint
-- [ ] Session 归档时归档所有 Checkpoint
-- [ ] 可以查询 Session 列表
-- [ ] 可以按状态、总控过滤 Session
-- [ ] 可以查询 Session 的生命周期历史
-- [ ] 可以恢复到指定的 Checkpoint
-- [ ] 可以清理过期的 Checkpoint
-- [ ] 软删除的 Session 不再出现在正常列表中
-- [ ] 永久删除的 Session 及其 Checkpoint 被完全清理
-- [ ] 所有单元测试通过
-- [ ] 集成测试通过
-- [ ] 回归测试通过
+- [x] 可以创建 Session，初始状态为 Draft
+- [x] Session 状态机所有合法转换都能正常工作
+- [x] 非法状态转换被正确拒绝
+- [x] 可以将 Session 关联到总控
+- [x] 可以解绑总控
+- [x] Session 创建时自动创建初始 Checkpoint
+- [x] Session 状态变化时自动创建 Checkpoint
+- [x] Session 归档时归档所有 Checkpoint
+- [x] 可以查询 Session 列表
+- [x] 可以按状态、总控过滤 Session
+- [x] 可以查询 Session 的生命周期历史
+- [x] 可以恢复到指定的 Checkpoint
+- [x] 可以清理过期的 Checkpoint
+- [x] 软删除的 Session 不再出现在正常列表中
+- [x] 永久删除的 Session 及其 Checkpoint 被完全清理
+- [x] 所有单元测试通过 (167 tests passed)
+- [x] 集成测试通过
+- [x] 回归测试通过
+
+**验收完成日期：2026-03-11**
+**验收结果：✅ Phase 4.3 验收通过！**
 
 ---
 

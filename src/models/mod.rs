@@ -177,6 +177,50 @@ impl SessionRepository {
         sessions.values().map(SessionInfo::from).collect()
     }
 
+    /// 按状态过滤列出 Session
+    pub async fn list_by_state(
+        &self,
+        state: crate::models::session::SessionState,
+    ) -> Vec<SessionInfo> {
+        let sessions = self.sessions.read().await;
+        sessions
+            .values()
+            .filter(|s| s.state == state)
+            .map(SessionInfo::from)
+            .collect()
+    }
+
+    /// 按总控 ID 过滤列出 Session
+    pub async fn list_by_orchestrator(
+        &self,
+        orchestrator_id: crate::orchestrator::OrchestratorId,
+    ) -> Vec<SessionInfo> {
+        let sessions = self.sessions.read().await;
+        sessions
+            .values()
+            .filter(|s| s.orchestrator_id == Some(orchestrator_id))
+            .map(SessionInfo::from)
+            .collect()
+    }
+
+    /// 按时间范围过滤列出 Session
+    pub async fn list_by_time_range(
+        &self,
+        created_after: Option<chrono::DateTime<chrono::Utc>>,
+        created_before: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Vec<SessionInfo> {
+        let sessions = self.sessions.read().await;
+        sessions
+            .values()
+            .filter(|s| {
+                let after_ok = created_after.is_none_or(|after| s.created_at >= after);
+                let before_ok = created_before.is_none_or(|before| s.created_at <= before);
+                after_ok && before_ok
+            })
+            .map(SessionInfo::from)
+            .collect()
+    }
+
     pub async fn update(&self, session: Session) -> Result<()> {
         let mut sessions = self.sessions.write().await;
         if let std::collections::hash_map::Entry::Occupied(mut e) = sessions.entry(session.id) {

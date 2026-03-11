@@ -32,6 +32,9 @@ pub enum Error {
     #[error("Session not found: {0}")]
     SessionNotFound(String),
 
+    #[error("Invalid session state: {0}")]
+    SessionInvalidState(String),
+
     #[error("Message not found: {0}")]
     MessageNotFound(String),
 
@@ -143,6 +146,7 @@ impl axum::response::IntoResponse for Error {
             Error::AddrParse(_) => axum::http::StatusCode::BAD_REQUEST,
             Error::Llm(_) => axum::http::StatusCode::BAD_GATEWAY,
             Error::SessionNotFound(_) => axum::http::StatusCode::NOT_FOUND,
+            Error::SessionInvalidState(_) => axum::http::StatusCode::BAD_REQUEST,
             Error::MessageNotFound(_) => axum::http::StatusCode::NOT_FOUND,
             Error::InvalidInput(_) => axum::http::StatusCode::BAD_REQUEST,
             Error::InvalidConfig(_) => axum::http::StatusCode::BAD_REQUEST,
