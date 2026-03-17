@@ -52,7 +52,8 @@
 - [Claw 定义 (CLAW_DEFINITION.md)](docs/CLAW_DEFINITION.md) - 了解什么是 Claw
 - [Phase 1 文档](docs/PHASE1.md) - 基础消息流转设计
 - [Phase 2 文档](docs/PHASE2.md) - MCP 集成设计
-- [Phase 3 文档 (进行中)](docs/PHASE3_inprogress.md) - 本地工具与 Checkpoint 集成
+- [Phase 3 文档](docs/PHASE3.md) - 本地工具与 Checkpoint 集成
+- [Phase 4 文档 (进行中)](docs/PHASE4_inprogress.md) - 多 Agent 基础架构
 
 ## 🚀 快速开始
 
@@ -124,11 +125,11 @@ cargo run
 
 - **Phase 1**：基础消息流转 ✅
 - **Phase 2**：MCP 集成 ✅
-- **Phase 3**：本地工具与 Checkpoint 集成 🔄（进行中）
+- **Phase 3**：本地工具与 Checkpoint 集成 ✅
 
 ### 📋 未来计划
 
-- **Phase 4**：多 Agent 基础架构
+- **Phase 4**：多 Agent 基础架构 🔄（进行中）
 - **Phase 5**：任务编排与路由系统
 - **Phase 6**：高级协作与质量保障
 - **Phase 7**：经验学习与持续进化

@@ -268,32 +268,19 @@ MineClaw 采用**混合协作模式**，结合两种核心协作方式：
 - **消息追踪**：每个 Agent 的回复都有唯一的消息 ID 记录
 - **简化协作**：避免复杂的Agent间依赖，让流程更清晰可控
 
-### IDE 协同：Agent Client Protocol (ACP) 集成
+### 独立大屏与全景可视化前端
 
-MineClaw 将通过 **Agent Client Protocol (ACP)** 与用户习惯的 IDE 无缝协同工作。
+MineClaw 放弃了与现有 IDE 强绑定的插件形式，而是选择成为一个拥有独立控制台的“AI 自动化工厂”。
 
-#### 什么是 ACP？
-- **类似 LSP 的标准化协议**：专门用于标准化 IDE/编辑器与 AI Agent 之间的通信
-- **MCP 友好**：构建在 JSON-RPC 之上，尽可能重用 MCP 类型
-- **本地 + 远程支持**：
-  - **本地 Agent**：作为编辑器子进程运行，通过 stdio 的 JSON-RPC 通信
-  - **远程 Agent**：可在云端或独立基础设施上托管，通过 HTTP 或 WebSocket 通信
-- **主流 IDE 支持**：已被 Zed、JetBrains 等支持
-
-#### ACP 集成价值
-- **随时随地派任务**：用户可以在 IDE 中直接与 MineClaw 交互
-- **无缝体验**：Agent 可以直接访问编辑器中的文件、终端、MCP 服务器
-- **生态兼容**：符合 ACP 标准的 MineClaw 可以在所有支持 ACP 的编辑器中使用
-- **双向通信**：
-  - Agent 可以向编辑器请求工具调用权限
-  - 编辑器可以向 Agent 推送实时更新（通过 JSON-RPC 通知）
+#### 为什么选择独立前端？
+- **全景工作流可视化**：可以直观展示 Agent 树状层级（谁在指挥谁）、工单 (Work Order) 的流转路径。
+- **Checkpoint 交互式管理**：像 Git 树一样查看所有快照，实现时间轴式的代码变更对比 (Diff) 与一键回退。
+- **零干预模式 (Autonomous Mode)**：用户只需看大盘监控，出现异常时（如 CMA 告警或 Agent 主动求助）再进行轻量级干预。
+- **掌控底层存储**：保留 Rust 后端对 `AgentFS` 和 Checkpoint 的绝对控制权，不再受限于第三方 IDE 的客户端沙箱体系。
 
 #### 集成策略
-- **官方 Rust 库支持**：使用 `agent-client-protocol` crate
-- **双重访问模式**：
-  1. **REST API + Flutter 前端**（传统 Web 方式）
-  2. **ACP 协议**（IDE 协同方式）
-- **共享核心逻辑**：两种访问方式共享相同的多 Agent 编排核心
+- **全异步监控 API**：基于 REST + SSE/WebSocket 打造实时状态总线。
+- **Flutter 跨平台控制台**：统一的控制中心，负责任务下发、进度追踪和人工审批。
 
 ## 已完成阶段
 
@@ -316,18 +303,18 @@ MineClaw 将通过 **Agent Client Protocol (ACP)** 与用户习惯的 IDE 无缝
 - SSE 流式模式
 - API 扩展和管理功能
 
-### Phase 3: 本地工具与 Checkpoint 集成 🔄
-- [详细文档](./PHASE3_inprogress.md) (进行中)
+### Phase 3: 本地工具与 Checkpoint 集成 ✅
+- [详细文档](./PHASE3.md)
 - ✅ API Key 加密存储
-- ⏳ 终端工具 (进行中)
+- ✅ 终端工具
 - ✅ 文件工具集
 - ✅ Checkpoint 集成（与文件工具深度集成）
 - ✅ 配置文件动态修改
 
 ## 未来计划详细设计
 
-### Phase 4: 多 Agent 基础架构 📋
-- [详细文档](./PHASE4_planning.md)
+### Phase 4: 多 Agent 基础架构 🔄
+- [详细文档](./PHASE4_inprogress.md) (进行中)
 - **目标**：建立多 Agent 运行的基础框架，支持层级化总控架构、可嵌套子总控、上下文管理 Agent 的两种触发机制，以及复杂任务的两种执行模式
 - **执行原则**：严格按照 Baby Steps™ 方法论执行，分优先级逐步实现，先验证核心概念，再扩展功能
 
@@ -425,28 +412,24 @@ MineClaw 将通过 **Agent Client Protocol (ACP)** 与用户习惯的 IDE 无缝
 
 ---
 
-#### 🔌 第三优先级：集成
-**目标**：与外部系统和协议集成
+#### 🔌 第三优先级：API 扩展与全景监控 (为前端铺路)
+**目标**：为 Phase 8 的全景可视化前端提供丰富的接口和实时数据流
 
-##### Phase 4.7: ACP (Agent Client Protocol) 集成
-- ACP 基础依赖
-  - 引入 `agent-client-protocol` crate
-  - 学习和理解 ACP 协议规范
-- ACP Agent 实现
-  - 实现 ACP `Agent` trait
-  - 基础初始化和会话设置
-  - 支持多个并发会话
-- 核心功能集成
-  - Prompt Turn 处理
-  - 内容展示（Markdown 格式）
-  - 工具调用集成（复用现有 MCP 和本地工具）
-  - 文件系统访问（与现有 Checkpoint/AgentFS 集成）
-  - 终端访问（与现有终端工具集成）
-- 编辑器集成验证
-  - 在 Zed 编辑器中测试基础集成
-- 与 Web API 共存
-  - 确保 ACP 和 REST API 可以同时运行
-  - 共享核心业务逻辑
+##### Phase 4.7: 监控与可视化 API
+- 实时状态总线 (SSE / WebSocket - 仪表盘级)
+  - **注：采用事件级推送而非 Token 级流式**，重点面向大屏和监控场景。
+  - 推送 Agent 状态变更 (Idle, Busy, WaitingForReview)
+  - 推送工单流转事件 (WorkOrder Created, Assigned, Completed)
+  - 推送 CMA 告警与干预事件
+  - **统一的工具事件推送 (ToolCall / ToolResult)**，包括终端输出在内的所有工具结果均作为普通事件节点推送，无需专门的流式终端，保持前端大盘轻量级
+- 历史追踪 API
+  - 查询指定 Session 下的所有消息流转记录
+  - 检索某个 Agent 的工作链路和执行日志
+- Checkpoint 与 AgentFS 接口
+  - 可视化获取指定 Checkpoint 的文件树状态
+  - 差异对比 (Diff) 接口（提供变更高亮支持）
+- 多端协同基础
+  - 允许前端以“只读身份”挂载（仅监控）或“管理员身份”挂载（可审批求助）
 
 ---
 
@@ -690,22 +673,23 @@ MineClaw 将通过 **Agent Client Protocol (ACP)** 与用户习惯的 IDE 无缝
 - Checkpoint 机制
 - API Key 加密
 - 配置动态修改
-
-### 🔄 进行中 (Phase 3)
 - 终端工具
+
+### 🔄 进行中 (Phase 4)
+- Agent 基础架构实现
 
 ### 📋 待开发
 
-#### Phase 4: 多 Agent 基础架构
+#### Phase 4: 多 Agent 基础架构 (进行中)
 - Agent 基础定义与生命周期
 - 消息总线基础
 - Checkpoint 与会话增强
 - 工具掩码基础机制
 - 上下文管理 Agent（基础版）
 - 基础 API 扩展
-- ACP 协议集成
-- ACP Agent 实现
-- ACP 编辑器集成验证
+- 实时状态推送 (SSE) 基础搭建
+- 可视化查询与 Checkpoint 差异分析 API
+- 监控模式接口验证
 
 #### Phase 5: 任务编排与路由系统
 - 路由模型实现
@@ -729,11 +713,12 @@ MineClaw 将通过 **Agent Client Protocol (ACP)** 与用户习惯的 IDE 无缝
 - OpenViking 集成（上下文数据库）
 - EvoMap 集成（AI 自我进化）
 
-#### Phase 8: Flutter 前端
-- 对话界面
-- 可视化配置
-- 状态仪表板
-- 电子宠物集成
+#### Phase 8: Flutter 前端 (MineClaw Control Center)
+- 全景工作流仪表盘（动态展示 Agent 树与工单流转）
+- Checkpoint 时间轴与代码变更对比 (Diff)
+- CMA 告警与人工干预处理中心
+- 对话界面与电子宠物集成
+- 可视化配置与工具权限管理
 
 ### 🎯 长期规划
 - 状态监控 API
@@ -830,10 +815,10 @@ MineClaw 将通过 **Agent Client Protocol (ACP)** 与用户习惯的 IDE 无缝
 - Phase 6 就开始为 Phase 7 准备数据结构
 - 确保平滑过渡到持续进化阶段
 
-### 13. ACP 协议优先
-- 与 IDE 协同是核心能力
-- ACP 和 Web API 共享核心逻辑
-- 支持本地和远程两种部署模式
+### 13. 独立控制台优先 (取代 ACP)
+- 放弃 ACP 的原因在于其“IDE 主导”的哲学与 MineClaw “后端自治”的 Checkpoint/AgentFS 机制冲突。
+- 采用独立大屏前端可以实现对复杂多 Agent 协作和工单流转的完美可视化。
+- 提供 API-First 的设计，通过 SSE/WebSocket 保障前端对底层状态的实时掌控。
 
 ---
 

@@ -2,6 +2,8 @@
 
 ## 📊 当前状态更新（2026.3.17）
 
+- **Phase 4.5 上下文管理 Agent (CMA) 核心实现完成**：实现了上下文存储、裁剪策略（FIFO/优先级/混合）、持续犯错检测以及专用的 ContextManagerAgent。支持 Agent 求助（触发点 1）和上下文长度自动监控（触发点 2）。
+
 **Phase 4.1: Agent 基础定义** - ✅ **完成**
 - 所有核心数据结构和功能实现
 - 119 个单元测试全部通过
@@ -170,7 +172,7 @@ TaskManager 的基础功能已完成，后续可以：
 - 支持平行子总控集群模式（可并行分解场景）
 - 上下文管理 Agent 可以裁剪上下文、判断回退和转交
 - Session 与 Checkpoint 完整集成
-- 基础 API 可以管理总控和 Agent
+- 监控与可视化 API 支持实时状态推送和 Checkpoint 差异分析
 - 所有单元测试通过
 - 完整的文档和验收清单
 
@@ -981,23 +983,23 @@ TaskManager 的基础功能已完成，后续可以：
 
 ---
 
-### Phase 4.5: 上下文管理 Agent（基础版，两种触发机制）
+### Phase 4.5: 上下文管理 Agent（基础版，两种触发机制） ✅
 
 #### 任务清单
-- [ ] 定义 ContextId 类型
-- [ ] 定义 ContextChunk 结构
-- [ ] 定义 ContextMetadata 结构
-- [ ] 定义 ContextStore 结构
-- 实现 Agent 求助接收机制（触发点 1）
-- 实现上下文长度监控（触发点 2，唯一自动触发点）
-- 实现上下文清理（裁剪）
-- 实现持续犯错判断
-- 实现回退到指定 Checkpoint
-- 实现触发总控转交
-- 定义上下文裁剪策略模板
-- 实现 ContextManagerAgent（作为特殊 Agent）
-- 编写单元测试
-- 验证验收清单
+- [x] 定义 ContextId 类型
+- [x] 定义 ContextChunk 结构
+- [x] 定义 ContextMetadata 结构
+- [x] 定义 ContextStore 结构
+- [x] 实现 Agent 求助接收机制（触发点 1）
+- [x] 实现上下文长度监控（触发点 2，唯一自动触发点）
+- [x] 实现上下文清理（裁剪）
+- [x] 实现持续犯错判断
+- [x] 实现回退到指定 Checkpoint (由 CMA 建议并触发通知)
+- [x] 实现触发总控转交 (通过 CmaNotification)
+- [ ] 定义上下文裁剪策略模板 (基础策略已实现)
+- [x] 实现 ContextManagerAgent（作为服务型 Agent）
+- [x] 编写单元测试
+- [x] 验证验收清单
 
 #### 数据结构设计
 
@@ -1161,32 +1163,32 @@ TaskManager 的基础功能已完成，后续可以：
 - 单元测试：上下文存储和检索
 - 单元测试：裁剪策略
 - 单元测试：持续犯错检测
-+- 单元测试：工单接收和处理（来自 Agent 的求助）
+- 单元测试：工单接收和处理（来自 Agent 的求助）
 - 单元测试：工单生成
 - 集成测试：ContextManagerAgent 端到端流程（两种触发机制）
 
 #### 验收标准
-- [ ] 可以存储上下文块
-- [ ] 可以获取完整上下文
-- [ ] 可以正确计算 token 数
-- [ ] 可以检查是否需要裁剪（唯一自动触发点）
-+- [ ] 可以接收 Agent 的求助工单（recipient = ContextManager）
-- [ ] FIFO 裁剪策略正常工作
-- [ ] 基于重要性的裁剪策略正常工作
-- [ ] 混合裁剪策略正常工作
-- [ ] 重要块被优先保留
-- [ ] 可以标记块为重要
-- [ ] 持续犯错检测正常工作
-- [ ] 可以决定回退到哪个 Checkpoint
-+- [ ] 收到求助工单后可以通知总控进行转交
-- 可以创建工单（JSON 格式）
-- [ ] 策略模板可以保存和读取
-- [ ] 可以设置默认模板
-- [ ] ContextManagerAgent 只在两种情况下触发
-- [ ] ContextManagerAgent 可以监控上下文
-- [ ] ContextManagerAgent 可以自动触发裁剪
-- [ ] 所有单元测试通过
-- [ ] 集成测试通过
+- [x] 可以存储上下文块
+- [x] 可以获取完整上下文
+- [x] 可以正确计算 token 数 (简易估算实现)
+- [x] 可以检查是否需要裁剪（唯一自动触发点）
+- [x] 可以接收 Agent 的求助工单（recipient = ContextManager）
+- [x] FIFO 裁剪策略正常工作
+- [x] 基于重要性的裁剪策略正常工作
+- [x] 混合裁剪策略正常工作
+- [x] 重要块被优先保留
+- [x] 可以标记块为重要
+- [x] 持续犯错检测正常工作
+- [x] 可以决定回退到哪个 Checkpoint (通过工单建议)
+- [x] 收到求助工单后可以通知总控进行转交
+- [x] 可以从消息/工单创建上下文块
+- [ ] 策略模板可以保存和读取 (待后续模板化增强)
+- [x] 可以设置默认模板/策略
+- [x] ContextManagerAgent 只在两种情况下触发
+- [x] ContextManagerAgent 可以监控上下文
+- [x] ContextManagerAgent 可以自动触发裁剪
+- [x] 所有单元测试通过
+- [x] 集成测试通过 (CMA 逻辑验证)
 
 ---
 
@@ -1451,165 +1453,76 @@ TaskManager 的基础功能已完成，后续可以：
 
 ## 🔌 第三优先级：集成
 
-### Phase 4.7: ACP (Agent Client Protocol) 集成
+### Phase 4.7: 监控与可视化 API (为前端铺路)
+
+#### 目标
+为 Phase 8 的 Flutter 全景可视化前端提供丰富的实时数据流和历史追踪接口，支持对多 Agent 协作网络、工单流转和 Checkpoint 变更的全方位监控。
 
 #### 任务清单
-- [ ] 研究 ACP 协议规范
-- [ ] 引入 agent-client-protocol crate
-- [ ] 学习 ACP 的核心概念
-- [ ] 设计 ACP Agent 实现
-- [ ] 实现 ACP Agent trait
-- [ ] 实现基础初始化和会话设置
-- [ ] 实现多并发会话支持
-- [ ] 实现 Prompt Turn 处理
-- [ ] 实现内容展示（Markdown 格式）
-- [ ] 集成工具调用（复用现有 MCP 和本地工具）
-- [ ] 集成文件系统访问（与 Checkpoint/AgentFS 集成）
-- [ ] 集成终端访问（与现有终端工具集成）
-- [ ] 确保 ACP 和 REST API 可以同时运行
-- [ ] 共享核心业务逻辑
-- [ ] 在 Zed 编辑器中测试基础集成
+- [ ] 设计并实现实时状态总线 (SSE)
+- [ ] 实现 Agent 状态实时推送接口
+- [ ] 实现工单 (WorkOrder) 生命周期事件推送
+- [ ] 实现 CMA 告警与干预事件推送
+- [ ] 设计历史追踪 API
+- [ ] 实现 Session 完整消息链路查询
+- [ ] 实现 Agent 级执行日志检索
+- [ ] 增强 Checkpoint API
+- [ ] 实现 Checkpoint 文件树可视化接口
+- [ ] 实现代码变更差异 (Diff) 分析接口
+- [ ] 实现监控模式权限控制 (ReadOnly vs Admin)
+- [ ] 编写前端模拟器进行 API 验证
 - [ ] 编写集成测试
-- [ ] 验证验收清单
 
-#### ACP 核心概念（概述）
+#### 核心概念（监控模型）
 
-**ACP Agent Trait**
-- 核心 trait，定义 Agent 的行为
-- 需要实现的主要方法：
-  - initialize: 初始化 Agent
-  - new_session: 创建新会话
-  - prompt: 处理提示词
-  - 其他可选方法
+**实时状态总线 (Status Bus)**
+- 基于 SSE (Server-Sent Events) 的单向推送机制。
+- 订阅模型：前端可以订阅全局事件或特定 Session/Agent 的事件。
 
-**Prompt Turn**
-- 用户和 Agent 之间的一次交互
-- 包含用户输入和 Agent 响应
-- 可以包含工具调用
+**事件类型定义**
+- `AgentStateChanged`: 状态切换 (Idle -> Busy -> WaitingForReview)。
+- `WorkOrderEvent`: 工单创建、指派、状态更新。
+- `CmaEvent`: 上下文裁剪通知、持续犯错告警、强制回滚建议。
+- `TaskProgress`: 任务执行百分比或阶段性产出。
 
-**内容展示**
-- 支持 Markdown 格式
-- 支持代码块
-- 支持其他富文本格式
+**可视化视图支持**
+- **拓扑视图 (Topology)**: 提供父子 Orchestrator 和 Worker Agent 的层级关系数据。
+- **时间轴视图 (Timeline)**: 提供 Checkpoint 的线性增长曲线。
+- **对比视图 (Diff)**: 提供两个 Checkpoint 之间文件系统状态的差异描述。
 
-**工具调用**
-- ACP 定义的工具调用协议
-- 需要桥接到现有的工具系统
+#### 架构设计
 
-**会话管理**
-- 支持多个并发会话
-- 每个会话有独立的状态
+**SSE 控制器 (SseController)**
+- 维护所有活跃的 SSE 连接，集成到现有 Axum 路由中。
+- 提供广播 (Broadcast) 和定向推送 (Unicast) 能力。
 
-#### 集成架构设计
+**事件转发器 (EventForwarder)**
+- 监听内部 Executor 的关键动作，将内部状态变更包装为标准可视化事件。
 
-**ACP Server**
-- 独立的服务器，与 REST API 并行运行
-- 共享应用状态（总控、Session 等）
-- 使用 ACP 协议与客户端通信
+**差异对比引擎 (DiffEngine)**
+- 调用 `AgentFS` 的比较功能，返回 JSON 格式的变更列表（Added, Modified, Deleted）。
 
-**ACP Agent 实现**
-- 包装 MineClaw 的核心逻辑
-- 将 ACP 请求转换为内部调用
-- 将内部响应转换为 ACP 格式
-- 内部使用总控来管理任务
+#### API 设计
 
-**工具桥接层**
-- 将 ACP 工具调用转换为 ToolCoordinator 调用
-- 将工具结果转换回 ACP 格式
+**1. 建立监控连接**
+- `GET /api/v1/monitor/events?session_id={id}`
+- 返回 SSE 流。
 
-**文件系统桥接层**
-- 将 ACP 文件系统请求转换为 AgentFS 操作
-- 与 Checkpoint 系统集成
+**2. 获取全景拓扑**
+- `GET /api/v1/monitor/topology?session_id={id}`
+- 返回 Agent 树状层级结构。
 
-**终端桥接层**
-- 将 ACP 终端请求转换为现有终端工具调用
-
-#### 数据结构设计
-
-**AcpServerConfig**
-- enabled: bool（是否启用 ACP 服务器）
-- listen_address: SocketAddr
-- 其他 ACP 特定配置
-
-**AcpSessionState**
-- session_id: SessionId（内部 Session ID）
-- orchestrator_id: Option<OrchestratorId>（关联的总控）
-- created_at: DateTime<Utc>
-- last_activity_at: DateTime<Utc>
-
-**AcpState**
-- 共享的 ACP 服务器状态
-- sessions: HashMap<AcpSessionId, AcpSessionState>
-- 指向应用核心状态的引用
-
-#### API 设计（内部）
-
-**ACP 服务器启动**
-- 输入：AcpServerConfig, 应用核心状态
-- 输出：Result<ServerHandle, Error>
-- ServerHandle 用于优雅关闭
-
-**ACP 服务器停止**
-- 输入：ServerHandle
-- 输出：Result<(), Error>
-
-**Prompt Turn 处理流程**
-1. 接收 ACP prompt 请求
-2. 创建或获取内部 Session
-3. 如果需要，创建或获取总控
-4. 将用户输入转换为内部消息
-5. 通过总控分配任务给 Agent
-6. 等待 Agent 响应
-7. 将 Agent 响应转换为 ACP 格式
-8. 返回响应
-
-**工具调用流程**
-1. 接收 ACP 工具调用请求
-2. 验证权限（使用工具掩码）
-3. 调用 ToolCoordinator
-4. 将结果转换为 ACP 格式
-5. 返回响应
-
-**文件系统访问流程**
-1. 接收 ACP 文件系统请求
-2. 检查 Session 的 Checkpoint
-3. 执行文件操作
-4. 如果需要，创建新的 Checkpoint
-5. 返回结果
-
-**终端访问流程**
-1. 接收 ACP 终端请求
-2. 调用现有终端工具
-3. 返回结果
-
-#### 与 REST API 共存
-- 两个服务器独立运行，监听不同端口
-- 共享同一个应用核心状态
-- 使用 Arc<RwLock> 保护共享状态
-- 确保线程安全
-
-#### 测试策略
-- 单元测试：桥接层的各个组件
-- 集成测试：ACP 端到端流程
-- 手动测试：在 Zed 编辑器中实际使用
+**3. 获取 Checkpoint 差异**
+- `GET /api/v1/monitor/checkpoints/{id}/diff?compare_with={other_id}`
+- 返回两个快照间的差异数据。
 
 #### 验收标准
-- [ ] agent-client-protocol crate 成功引入
-- [ ] ACP Agent trait 正确实现
-- [ ] ACP 服务器可以正常启动
-- [ ] 可以创建新会话
-- [ ] Prompt Turn 处理正常工作
-- [ ] Markdown 内容正确展示
-- [ ] 工具调用集成正常工作
-- [ ] 工具权限检查正常工作
-- [ ] 文件系统访问集成正常工作
-- [ ] 与 Checkpoint 集成正常工作
-- [ ] 终端访问集成正常工作
-- [ ] 支持多个并发会话
-- [ ] ACP 和 REST API 可以同时运行
-- [ ] 在 Zed 编辑器中基础集成验证通过
-- [ ] 所有单元测试通过
-- [ ] 集成测试通过
+- [ ] SSE 连接可以正常建立且稳定
+- [ ] Agent 状态切换与工单状态变更能实时推送
+- [ ] CMA 干预事件能准确捕捉并推送
+- [ ] 可以通过 API 获取 Session 的 Agent 树状拓扑
+- [ ] 可以正确计算并返回 Checkpoint 间的 Diff
+- [ ] 监控模式下的权限隔离有效
 
 ---
 

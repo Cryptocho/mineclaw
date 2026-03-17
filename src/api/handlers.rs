@@ -367,7 +367,9 @@ pub async fn debug_echo(Json(request): Json<DebugEchoRequest>) -> Result<Json<De
     }))
 }
 
-pub async fn debug_session_count(State(state): State<AppState>) -> Result<Json<DebugSessionCountResponse>> {
+pub async fn debug_session_count(
+    State(state): State<AppState>,
+) -> Result<Json<DebugSessionCountResponse>> {
     info!("Debug session count requested");
 
     let sessions = state.session_repo.list().await;
@@ -397,7 +399,6 @@ pub async fn debug_terminal_run(
         task_id: None,
         detach: false,
         cwd: None,
-        stream_output: false,
     };
 
     let result_value = state
@@ -446,7 +447,6 @@ pub async fn debug_terminal_test_output(
         task_id: None,
         detach: false,
         cwd: None,
-        stream_output: false,
     };
 
     let result_value = state
@@ -487,7 +487,6 @@ pub async fn debug_terminal_test_timeout(
         task_id: None,
         detach: false,
         cwd: None,
-        stream_output: false,
     };
 
     let result_value = state
@@ -528,7 +527,6 @@ pub async fn debug_terminal_test_truncation(
         task_id: None,
         detach: false,
         cwd: None,
-        stream_output: false,
     };
 
     let result_value = state

@@ -4,11 +4,15 @@
 
 // 占位模块声明，后续会实现
 pub mod builder;
+pub mod context;
+pub mod context_manager;
 pub mod types;
 pub mod work_order;
 
 // 占位 use 声明，后续会实现
 pub use builder::*;
+pub use context::*;
+pub use context_manager::*;
 pub use types::*;
 pub use work_order::*;
 

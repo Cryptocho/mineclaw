@@ -30,9 +30,6 @@ pub struct RunCommandParams {
     pub detach: bool,
     /// 工作目录（可选）
     pub cwd: Option<String>,
-    /// 是否流式输出（可选）
-    #[serde(default)]
-    pub stream_output: bool,
 }
 
 /// 运行命令结果
@@ -757,10 +754,7 @@ impl crate::tools::LocalTool for RunCommandTool {
                     "type": "string",
                     "description": "The working directory to run the command in."
                 },
-                "stream_output": {
-                    "type": "boolean",
-                    "description": "Whether to stream output (not implemented yet)."
-                },
+
                 "task_id": {
                     "type": "string",
                     "description": "The unique task ID for continuing long-running tasks."
@@ -924,7 +918,7 @@ impl crate::tools::LocalTool for RunCommandTool {
                 cmd.arg("-NonInteractive");
                 cmd.arg("-NoProfile");
                 cmd.arg("-Command");
-                
+
                 // 在 PowerShell 中执行完整命令字符串
                 cmd.arg(full_command);
                 cmd
@@ -935,7 +929,7 @@ impl crate::tools::LocalTool for RunCommandTool {
                     .ok()
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| "sh".to_string());
-                
+
                 let mut cmd = Command::new(&shell);
                 cmd.arg("-c");
                 cmd.arg(full_command);
@@ -1137,7 +1131,6 @@ mod tests {
             task_id: None,
             detach: false,
             cwd: None,
-            stream_output: false,
         }
     }
 
@@ -1148,7 +1141,6 @@ mod tests {
             task_id: None,
             detach: true,
             cwd: None,
-            stream_output: false,
         }
     }
 
@@ -1191,7 +1183,6 @@ mod tests {
             task_id: None,
             detach: false,
             cwd: None,
-            stream_output: false,
         };
 
         let result_value = tool
@@ -1217,7 +1208,6 @@ mod tests {
             task_id: None,
             detach: false,
             cwd: None,
-            stream_output: false,
         };
         let result = tool
             .call(serde_json::to_value(params).unwrap(), context)
@@ -1241,7 +1231,6 @@ mod tests {
             task_id: None,
             detach: false,
             cwd: None,
-            stream_output: false,
         };
 
         let result_value = tool
@@ -1270,7 +1259,6 @@ mod tests {
                 task_id: None,
                 detach: false,
                 cwd: None,
-                stream_output: false,
             }
         } else {
             RunCommandParams {
@@ -1278,7 +1266,6 @@ mod tests {
                 task_id: None,
                 detach: false,
                 cwd: None,
-                stream_output: false,
             }
         };
 
@@ -1288,8 +1275,16 @@ mod tests {
             .await
             .unwrap();
         let result1: RunCommandResult = serde_json::from_value(result_value).unwrap();
-        assert!(result1.is_timeout, "Expected timeout, but got exit_code: {}", result1.exit_code);
-        assert!(result1.stdout.contains("step1"), "stdout doesn't contain 'step1': {:?}", result1.stdout);
+        assert!(
+            result1.is_timeout,
+            "Expected timeout, but got exit_code: {}",
+            result1.exit_code
+        );
+        assert!(
+            result1.stdout.contains("step1"),
+            "stdout doesn't contain 'step1': {:?}",
+            result1.stdout
+        );
         assert!(!result1.stdout.contains("step2"));
         let task_id = result1.task_id;
 
@@ -1304,7 +1299,6 @@ mod tests {
             task_id: Some(task_id),
             detach: false,
             cwd: None,
-            stream_output: false,
         };
 
         let result_value2 = tool
@@ -1332,7 +1326,6 @@ mod tests {
             task_id: None,
             detach: false,
             cwd: None,
-            stream_output: false,
         };
 
         let result_value = tool
@@ -1357,7 +1350,6 @@ mod tests {
             task_id: None,
             detach: false,
             cwd: None,
-            stream_output: false,
         };
 
         let result = tool
@@ -1384,7 +1376,6 @@ mod tests {
             task_id: None,
             detach: false,
             cwd: None,
-            stream_output: false,
         };
 
         let result = tool
@@ -1426,8 +1417,7 @@ mod tests {
         let running_processes = std::sync::Arc::new(AtomicUsize::new(0));
         let processes = std::sync::Arc::new(Mutex::new(HashMap::new()));
 
-        let run_tool =
-            RunCommandTool::with_shared_state(running_processes, processes.clone());
+        let run_tool = RunCommandTool::with_shared_state(running_processes, processes.clone());
         let list_tool = ListBackgroundTasksTool::new(processes);
 
         let params = create_detach_sleep_params(5);
@@ -1465,8 +1455,7 @@ mod tests {
         let running_processes = std::sync::Arc::new(AtomicUsize::new(0));
         let processes = std::sync::Arc::new(Mutex::new(HashMap::new()));
 
-        let run_tool =
-            RunCommandTool::with_shared_state(running_processes, processes.clone());
+        let run_tool = RunCommandTool::with_shared_state(running_processes, processes.clone());
         let get_tool = GetTaskResultTool::new(processes);
 
         let params = RunCommandParams {
@@ -1474,7 +1463,6 @@ mod tests {
             task_id: None,
             detach: true,
             cwd: None,
-            stream_output: false,
         };
 
         // 启动后台任务

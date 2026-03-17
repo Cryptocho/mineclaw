@@ -320,7 +320,7 @@ enabled = true
 - [x] 实现命令黑名单检查
 - [x] 实现输出过滤系统
 - [x] 实现 `TerminalTool`
-- [x] 集成 SSE 流式输出
+- [x] 取消终端专用的 SSE 流式输出（改为统一由全局 API 以 ToolResult 事件推送）
 - [x] 编写单元测试
 
 **Phase 3.2 已完成** ✅
