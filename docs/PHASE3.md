@@ -316,12 +316,29 @@ enabled = true
 - 所有测试通过
 
 ### Phase 3.2: 终端工具
-- [ ] 设计终端工具配置结构
-- [ ] 实现命令黑名单检查
-- [ ] 实现输出过滤系统
-- [ ] 实现 `TerminalTool`
-- [ ] 集成 SSE 流式输出
-- [ ] 编写单元测试
+- [x] 设计终端工具配置结构
+- [x] 实现命令黑名单检查
+- [x] 实现输出过滤系统
+- [x] 实现 `TerminalTool`
+- [x] 集成 SSE 流式输出
+- [x] 编写单元测试
+
+**Phase 3.2 已完成** ✅
+- 实现了完整的 `TerminalTool`（`run_command` 工具）
+- 命令黑名单机制（硬编码 + 配置）
+- 输出限制和过滤系统
+- 工作目录限制和超时控制
+- **长时任务管理**
+  - 任务超时控制
+  - 续航机制
+- **鲁棒性增强**
+  - 交互式工具拦截
+  - 环境变量保护
+- **任务分离**
+  - `list_background_tasks` 工具
+  - `get_task_result` 工具
+  - 后台执行支持
+- 12 个完整测试覆盖所有功能
 
 ### Phase 3.3: 文件工具集
 - [x] 设计文件工具配置结构
@@ -447,10 +464,16 @@ enabled = true
 - [x] 在 `search_and_replace` 前自动创建 checkpoint
 - [x] 在 `replace_all_keywords` 前自动创建 checkpoint
 
+**Phase 3.4.5 已完成** ✅
+- 所有文件写操作前自动创建 checkpoint
+
 #### Phase 3.4.6: 集成到消息流
 - [x] Message 结构已有 `checkpoint_id` 字段
 - [x] ToolCoordinator 已集成 checkpoint_manager
 - [x] 文件工具已集成自动 checkpoint 功能
+
+**Phase 3.4.6 已完成** ✅
+- 完整集成到消息流
 
 #### Phase 3.4.7: Checkpoint 工具暴露
 - [x] 实现 `CreateCheckpointTool`
@@ -459,10 +482,21 @@ enabled = true
 - [x] 实现 `DeleteCheckpointTool`
 - [x] 注册到 `LocalToolRegistry`
 
+**Phase 3.4.7 已完成** ✅
+- 所有 Checkpoint 工具已暴露给 LLM
+
 #### Phase 3.4.8: 集成到 AppState
 - [x] 修改 `AppState` 添加 `CheckpointManager`
 - [x] 更新 `main.rs` 初始化 `CheckpointManager`
 - [x] 更新 `main.rs` 初始化 AgentFS
+
+**Phase 3.4.8 已完成** ✅
+- 完整集成到 AppState
+
+**Phase 3.4 整体已完成** ✅
+- 完整的 Checkpoint 功能实现
+- 27 个测试覆盖所有功能
+- 所有测试通过
 
 ### Phase 3.5: 本地工具集成
 - [x] 实现 `LocalTool` trait
@@ -472,6 +506,11 @@ enabled = true
 - [x] 更新 `ToolCoordinator` 集成本地工具
 - [x] 更新 `AppState` 添加本地工具注册表
 - [x] 编写集成测试
+
+**Phase 3.5 已完成** ✅
+- 完整的本地工具注册表实现
+- 与 MCP 工具协同工作
+- 所有 219 个测试通过
 
 ---
 
@@ -505,13 +544,13 @@ walkdir = "2.5"
 - [x] 错误处理正常（密钥错误等）
 
 ### Phase 3.2: 终端工具
-- [ ] 命令执行正常
-- [ ] 输出限制生效
-- [ ] 黑名单命令被阻止
-- [ ] 过滤规则生效
-- [ ] 工作目录限制生效
-- [ ] 超时控制生效
-- [ ] SSE 流式输出正常
+- [x] 命令执行正常
+- [x] 输出限制生效
+- [x] 黑名单命令被阻止
+- [x] 过滤规则生效
+- [x] 工作目录限制生效
+- [x] 超时控制生效
+- [x] SSE 流式输出正常
 
 ### Phase 3.3: 文件工具集
 - [x] `read_file` 正常（含截断）

@@ -2,6 +2,7 @@
 /config/mineclaw.toml
 /config/master.key
 /data
+/temp
 Cargo.lock
 
 # IDE

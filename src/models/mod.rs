@@ -157,12 +157,32 @@ impl SessionRepository {
     }
 
     pub async fn create(&self) -> Session {
-        let session = Session::new();
+        let mut session = Session::new();
         let mut sessions = self.sessions.write().await;
         sessions.insert(session.id, session.clone());
         drop(sessions);
 
-        self.save_session_to_agentfs(&session).await;
+        // 如果有 CheckpointManager，创建初始 Checkpoint
+        if let Some(checkpoint_manager) = &self.checkpoint_manager {
+            if let Ok(checkpoint) = checkpoint_manager
+                .create_checkpoint(
+                    &session,
+                    Some("Initial checkpoint".to_string()),
+                    crate::models::checkpoint::CheckpointType::Auto,
+                    None,
+                )
+                .await
+            {
+                session.current_checkpoint_id = Some(checkpoint.id.clone());
+                // 更新 Session
+                let mut sessions = self.sessions.write().await;
+                sessions.insert(session.id, session.clone());
+                drop(sessions);
+                self.save_session_to_agentfs(&session).await;
+            }
+        } else {
+            self.save_session_to_agentfs(&session).await;
+        }
 
         session
     }

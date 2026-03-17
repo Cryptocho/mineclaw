@@ -14,6 +14,7 @@ pub mod models;
 pub mod orchestrator;
 pub mod state;
 pub mod tool_coordinator;
+pub mod tool_mask;
 pub mod tools;
 
 pub use agent::AgentExecutor;

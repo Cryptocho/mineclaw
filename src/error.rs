@@ -104,6 +104,9 @@ pub enum Error {
     #[error("Work order error: {0}")]
     WorkOrder(String),
 
+    #[error("Tool mask not found: {0}")]
+    ToolMaskNotFound(String),
+
     #[error("Internal server error")]
     Internal,
 }
@@ -173,6 +176,7 @@ impl axum::response::IntoResponse for Error {
             Error::AgentInvalidConfig(_) => axum::http::StatusCode::BAD_REQUEST,
             Error::AgentExecution(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             Error::WorkOrder(_) => axum::http::StatusCode::BAD_REQUEST,
+            Error::ToolMaskNotFound(_) => axum::http::StatusCode::NOT_FOUND,
             Error::Internal => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
         };
 

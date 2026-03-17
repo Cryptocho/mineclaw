@@ -364,7 +364,7 @@ impl Session {
                 if !checkpoint.is_archived() {
                     checkpoint.archive();
                     // 保存归档后的 Checkpoint
-                    // 注意：这里需要 CheckpointManager 有更新方法，暂时跳过
+                    cm.update_checkpoint(&checkpoint).await?;
                     archived_checkpoints.push(checkpoint);
                 }
             }

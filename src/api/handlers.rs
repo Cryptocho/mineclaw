@@ -60,7 +60,6 @@ pub struct DebugSessionCountResponse {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct DebugTerminalRunRequest {
     pub command: String,
-    pub args: Vec<String>,
     pub timeout_seconds: Option<u64>,
     pub max_output_bytes: Option<usize>,
 }
@@ -385,7 +384,7 @@ pub async fn debug_terminal_run(
     State(state): State<AppState>,
     Json(request): Json<DebugTerminalRunRequest>,
 ) -> Result<Json<DebugTerminalRunResponse>> {
-    info!("Debug terminal run requested: {} {:?}", request.command, request.args);
+    info!("Debug terminal run requested: {}", request.command);
 
     let start_time = Instant::now();
 
@@ -397,10 +396,8 @@ pub async fn debug_terminal_run(
         command: request.command.clone(),
         task_id: None,
         detach: false,
-        args: request.args.clone(),
         cwd: None,
         stream_output: false,
-        confirmed: true,
     };
 
     let result_value = state
@@ -445,13 +442,11 @@ pub async fn debug_terminal_test_output(
     let context = crate::tools::ToolContext::new(session, state.config.clone());
 
     let params = crate::tools::terminal::RunCommandParams {
-        command: "sh".to_string(),
+        command: format!("sh -c \"{}\"", script),
         task_id: None,
         detach: false,
-        args: vec!["-c".to_string(), script],
         cwd: None,
         stream_output: false,
-        confirmed: true,
     };
 
     let result_value = state
@@ -488,13 +483,11 @@ pub async fn debug_terminal_test_timeout(
     let context = crate::tools::ToolContext::new(session, state.config.clone());
 
     let params = crate::tools::terminal::RunCommandParams {
-        command: "sleep".to_string(),
+        command: format!("sleep {}", sleep_seconds),
         task_id: None,
         detach: false,
-        args: vec![sleep_seconds.to_string()],
         cwd: None,
         stream_output: false,
-        confirmed: true,
     };
 
     let result_value = state
@@ -531,13 +524,11 @@ pub async fn debug_terminal_test_truncation(
     let context = crate::tools::ToolContext::new(session, state.config.clone());
 
     let params = crate::tools::terminal::RunCommandParams {
-        command: "sh".to_string(),
+        command: format!("sh -c \"{}\"", script),
         task_id: None,
         detach: false,
-        args: vec!["-c".to_string(), script.to_string()],
         cwd: None,
         stream_output: false,
-        confirmed: true,
     };
 
     let result_value = state

@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::tools::ToolContext;
-use crate::tools::shell_detection::{OperatingSystem, ShellDetector, ShellType};
+use crate::tools::shell_detection::{self, ShellType};
 use async_trait::async_trait;
 use chrono::Utc;
 use serde::Deserialize;
@@ -28,17 +28,11 @@ pub struct RunCommandParams {
     /// 是否在后台运行 (Phase EX3)
     #[serde(default)]
     pub detach: bool,
-    /// 参数列表
-    #[serde(default)]
-    pub args: Vec<String>,
     /// 工作目录（可选）
     pub cwd: Option<String>,
     /// 是否流式输出（可选）
     #[serde(default)]
     pub stream_output: bool,
-    /// 是否已人工确认（内部使用）
-    #[serde(default)]
-    pub confirmed: bool,
 }
 
 /// 运行命令结果
@@ -77,32 +71,11 @@ impl<'a> Drop for ProcessGuard<'a> {
     }
 }
 
-/// 运行命令历史条目 (Phase 4: 状态跟踪)
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CommandHistoryEntry {
-    /// 执行的命令
-    pub command: String,
-    /// 命令参数
-    pub args: Vec<String>,
-    /// 退出码
-    pub exit_code: i32,
-    /// 标准输出长度
-    pub stdout_len: usize,
-    /// 标准错误输出长度
-    pub stderr_len: usize,
-    /// 是否被截断
-    pub truncated: bool,
-    /// 执行时间戳 (RFC 3339)
-    pub timestamp: String,
-}
-
 // ==================== 终端工具实现 ====================
 
 struct RunCommandTool {
     /// 当前正在运行的进程数 (Phase 3: 并发控制)
     running_processes: std::sync::Arc<AtomicUsize>,
-    /// 命令执行历史 (Phase 4: 状态跟踪)
-    history: std::sync::Arc<Mutex<Vec<CommandHistoryEntry>>>,
     /// 活跃进程注册表 (Phase EX1: 长时任务管理)
     processes: std::sync::Arc<Mutex<HashMap<String, ActiveProcess>>>,
 }
@@ -112,19 +85,16 @@ impl RunCommandTool {
     pub fn new() -> Self {
         Self {
             running_processes: std::sync::Arc::new(AtomicUsize::new(0)),
-            history: std::sync::Arc::new(Mutex::new(Vec::new())),
             processes: std::sync::Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     pub fn with_shared_state(
         running_processes: std::sync::Arc<AtomicUsize>,
-        history: std::sync::Arc<Mutex<Vec<CommandHistoryEntry>>>,
         processes: std::sync::Arc<Mutex<HashMap<String, ActiveProcess>>>,
     ) -> Self {
         Self {
             running_processes,
-            history,
             processes,
         }
     }
@@ -252,15 +222,6 @@ impl RunCommandTool {
 
     fn is_command_always_allowed(&self, command: &str, context: &ToolContext) -> bool {
         for re in &context.config.local_tools.terminal.compiled_always_allow {
-            if re.is_match(command) {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn is_command_confirmation_required(&self, command: &str, context: &ToolContext) -> bool {
-        for re in &context.config.local_tools.terminal.compiled_always_confirm {
             if re.is_match(command) {
                 return true;
             }
@@ -398,7 +359,7 @@ impl RunCommandTool {
                     allowed_dir.to_string()
                 };
                 // Windows 下路径不区分大小写，Unix 下区分
-                if OperatingSystem::detect() == OperatingSystem::Windows {
+                if shell_detection::system_shell() == ShellType::Windows {
                     clean_cwd
                         .to_lowercase()
                         .starts_with(&clean_allowed.to_lowercase())
@@ -457,14 +418,6 @@ impl RunCommandTool {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn get_history(&self) -> Vec<CommandHistoryEntry> {
-        if let Ok(history) = self.history.lock() {
-            return history.clone();
-        }
-        Vec::new()
-    }
-
     #[allow(clippy::too_many_arguments)]
     async fn run_and_handle_output(
         &self,
@@ -513,7 +466,7 @@ impl RunCommandTool {
                         Ok(0) | Err(_) => stderr_done = true,
                         Ok(n) => {
                             let mut buf = stderr_buf_shared.lock().unwrap();
-                            buf.extend_from_slice(&out_chunk[..n]);
+                            buf.extend_from_slice(&err_chunk[..n]);
                         }
                     }
                 }
@@ -603,22 +556,6 @@ impl RunCommandTool {
             task_id,
         };
 
-        let entry = CommandHistoryEntry {
-            command: params.command.clone(),
-            args: params.args.clone(),
-            exit_code,
-            stdout_len: res.stdout.len(),
-            stderr_len: res.stderr.len(),
-            truncated,
-            timestamp: Utc::now().to_rfc3339(),
-        };
-        if let Ok(mut history) = self.history.lock() {
-            history.push(entry);
-            if history.len() > 100 {
-                history.remove(0);
-            }
-        }
-
         Ok(serde_json::to_value(res)?)
     }
 }
@@ -682,7 +619,6 @@ impl crate::tools::LocalTool for ListBackgroundTasksTool {
                 "task_id": task_id,
                 "pid": pid,
                 "command": ap.params.command,
-                "args": ap.params.args,
                 "start_time": ap.start_time.to_rfc3339(),
                 "uptime_seconds": duration.num_seconds(),
                 "stdout_summary": stdout_tail,
@@ -817,11 +753,6 @@ impl crate::tools::LocalTool for RunCommandTool {
                     "type": "string",
                     "description": "The command to run (e.g., 'ls', 'git status')."
                 },
-                "args": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Arguments for the command."
-                },
                 "cwd": {
                     "type": "string",
                     "description": "The working directory to run the command in."
@@ -829,10 +760,6 @@ impl crate::tools::LocalTool for RunCommandTool {
                 "stream_output": {
                     "type": "boolean",
                     "description": "Whether to stream output (not implemented yet)."
-                },
-                "confirmed": {
-                    "type": "boolean",
-                    "description": "Used internally to handle interactive confirmation."
                 },
                 "task_id": {
                     "type": "string",
@@ -932,11 +859,7 @@ impl crate::tools::LocalTool for RunCommandTool {
         }
 
         let task_id = uuid::Uuid::new_v4().to_string();
-        let full_command = if params.args.is_empty() {
-            params.command.clone()
-        } else {
-            format!("{} {}", params.command, params.args.join(" "))
-        };
+        let full_command = params.command.clone();
 
         if let Some(reason) = self.is_command_blacklisted(&full_command, &context) {
             return Err(crate::error::Error::LocalToolExecution {
@@ -954,15 +877,6 @@ impl crate::tools::LocalTool for RunCommandTool {
                 return Err(crate::error::Error::LocalToolExecution {
                     tool: "run_command".to_string(),
                     message: reason,
-                });
-            }
-            if self.is_command_confirmation_required(cmd, &context) && !params.confirmed {
-                return Err(crate::error::Error::ConfirmationRequired {
-                    tool: self.name().to_string(),
-                    message: format!(
-                        "Security Policy: Sub-command '{}' requires manual confirmation.",
-                        cmd
-                    ),
                 });
             }
         }
@@ -1001,46 +915,32 @@ impl crate::tools::LocalTool for RunCommandTool {
             });
         }
 
-        let system_info = ShellDetector::detect();
-        let mut command = if system_info.os == OperatingSystem::Windows {
-            if matches!(system_info.shell, ShellType::PowerShell) {
+        let shell_type = shell_detection::system_shell();
+        let full_command = params.command.clone();
+
+        let mut command = match shell_type {
+            ShellType::Windows => {
                 let mut cmd = Command::new("powershell");
                 cmd.arg("-NonInteractive");
                 cmd.arg("-NoProfile");
                 cmd.arg("-Command");
-
-                // 将命令和参数组合成单个字符串以在 PowerShell 中执行。
-                // 特殊处理 echo 以防止在没有参数时卡死，并确保输出格式一致。
-                let mut full_cmd = if params.command.contains(' ') {
-                    format!("& \"{}\"", params.command.replace('"', "`\""))
-                } else {
-                    params.command.clone()
-                };
-
-                let cmd_lower = params.command.to_lowercase();
-                if cmd_lower == "echo" || cmd_lower == "write-output" {
-                    // 合并参数为单个字符串，防止分行输出，且即使为空也能防止卡死。
-                    let joined = params.args.join(" ");
-                    full_cmd.push_str(&format!(" \"{}\"", joined.replace('"', "`\"")));
-                } else {
-                    for arg in &params.args {
-                        full_cmd.push_str(&format!(" \"{}\"", arg.replace('"', "`\"")));
-                    }
-                }
-
-                cmd.arg(full_cmd);
-                cmd
-            } else {
-                let mut cmd = Command::new("cmd");
-                cmd.arg("/c");
-                cmd.arg(&params.command);
-                cmd.args(&params.args);
+                
+                // 在 PowerShell 中执行完整命令字符串
+                cmd.arg(full_command);
                 cmd
             }
-        } else {
-            let mut cmd = Command::new(&params.command);
-            cmd.args(&params.args);
-            cmd
+            ShellType::Unix => {
+                // 优先使用 SHELL 环境变量指定的 shell，回退到 sh
+                let shell = std::env::var("SHELL")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "sh".to_string());
+                
+                let mut cmd = Command::new(&shell);
+                cmd.arg("-c");
+                cmd.arg(full_command);
+                cmd
+            }
         };
 
         if let Some(cwd) = &params.cwd {
@@ -1158,7 +1058,6 @@ impl TerminalTool {
 
     pub fn register_all(registry: &mut crate::tools::registry::LocalToolRegistry) {
         let running_processes = Arc::new(AtomicUsize::new(0));
-        let history = Arc::new(Mutex::new(Vec::<CommandHistoryEntry>::new()));
         let processes = Arc::new(Mutex::new(HashMap::<String, ActiveProcess>::new()));
 
         // Phase EX3: 启动后台 GC 工作协程 (定期清理不活跃的后台任务)
@@ -1201,7 +1100,6 @@ impl TerminalTool {
 
         registry.register(Arc::new(RunCommandTool::with_shared_state(
             running_processes,
-            history,
             processes.clone(),
         )));
         registry.register(Arc::new(ListBackgroundTasksTool::new(processes.clone())));
@@ -1218,6 +1116,41 @@ mod tests {
     use crate::models::Session;
     use crate::tools::LocalTool;
     use std::sync::Arc;
+
+    // 辅助函数：创建测试上下文
+    fn create_test_context() -> (Arc<Config>, Session, ToolContext) {
+        let config = Arc::new(Config::default());
+        let session = Session::new();
+        let context = ToolContext::new(session.clone(), config.clone());
+        (config, session, context)
+    }
+
+    // 辅助函数：判断是否是 Windows
+    fn is_windows() -> bool {
+        shell_detection::system_shell() == ShellType::Windows
+    }
+
+    // 辅助函数：创建简单的 echo 命令参数
+    fn create_echo_params(message: &str) -> RunCommandParams {
+        RunCommandParams {
+            command: format!("echo {}", message),
+            task_id: None,
+            detach: false,
+            cwd: None,
+            stream_output: false,
+        }
+    }
+
+    // 辅助函数：创建 detach 的 sleep 命令参数
+    fn create_detach_sleep_params(seconds: u32) -> RunCommandParams {
+        RunCommandParams {
+            command: format!("sleep {}", seconds),
+            task_id: None,
+            detach: true,
+            cwd: None,
+            stream_output: false,
+        }
+    }
 
     #[test]
     fn test_truncate_output() {
@@ -1250,32 +1183,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_command_failure() {
-        let config = Arc::new(Config::default());
-        let session = Session::new();
-        let context = ToolContext::new(session, config);
+        let (_, _, context) = create_test_context();
         let tool = RunCommandTool::new();
-        let is_windows = OperatingSystem::detect() == OperatingSystem::Windows;
-        let params = if is_windows {
-            RunCommandParams {
-                command: "cmd".to_string(),
-                task_id: None,
-                detach: false,
-                args: vec!["/c".to_string(), "exit 1".to_string()],
-                cwd: None,
-                stream_output: false,
-                confirmed: true,
-            }
-        } else {
-            RunCommandParams {
-                command: "sh".to_string(),
-                task_id: None,
-                detach: false,
-                args: vec!["-c".to_string(), "exit 1".to_string()],
-                cwd: None,
-                stream_output: false,
-                confirmed: true,
-            }
+
+        let params = RunCommandParams {
+            command: "exit 1".to_string(),
+            task_id: None,
+            detach: false,
+            cwd: None,
+            stream_output: false,
         };
+
         let result_value = tool
             .call(serde_json::to_value(params).unwrap(), context)
             .await
@@ -1295,13 +1213,11 @@ mod tests {
         let session = Session::new();
         let context = ToolContext::new(session, config);
         let params = RunCommandParams {
-            command: "sleep".to_string(),
+            command: "sleep 5".to_string(),
             task_id: None,
             detach: false,
-            args: vec!["5".to_string()],
             cwd: None,
             stream_output: false,
-            confirmed: false,
         };
         let result = tool
             .call(serde_json::to_value(params).unwrap(), context)
@@ -1320,33 +1236,12 @@ mod tests {
         let context = ToolContext::new(session, config);
         let tool = RunCommandTool::new();
 
-        let is_windows = OperatingSystem::detect() == OperatingSystem::Windows;
-        let params = if is_windows {
-            RunCommandParams {
-                command: "cmd".to_string(),
-                task_id: None,
-                detach: false,
-                args: vec![
-                    "/c".to_string(),
-                    "echo start & ping -n 5 127.0.0.1 > nul & echo end".to_string(),
-                ],
-                cwd: None,
-                stream_output: false,
-                confirmed: true,
-            }
-        } else {
-            RunCommandParams {
-                command: "sh".to_string(),
-                task_id: None,
-                detach: false,
-                args: vec![
-                    "-c".to_string(),
-                    "echo start; sleep 5; echo end".to_string(),
-                ],
-                cwd: None,
-                stream_output: false,
-                confirmed: true,
-            }
+        let params = RunCommandParams {
+            command: "echo start; sleep 5; echo end".to_string(),
+            task_id: None,
+            detach: false,
+            cwd: None,
+            stream_output: false,
         };
 
         let result_value = tool
@@ -1363,38 +1258,27 @@ mod tests {
     #[tokio::test]
     async fn test_run_command_continue() {
         let mut config = Config::default();
-        config.local_tools.terminal.timeout_seconds = 1;
+        config.local_tools.terminal.timeout_seconds = 2;
         let config = Arc::new(config);
         let session = Session::new();
         let context = ToolContext::new(session, config.clone());
         let tool = RunCommandTool::new();
 
-        let is_windows = OperatingSystem::detect() == OperatingSystem::Windows;
-        let params = if is_windows {
+        let params = if is_windows() {
             RunCommandParams {
-                command: "cmd".to_string(),
+                command: "echo step1 & ping -n 4 127.0.0.1 > nul & echo step2".to_string(),
                 task_id: None,
                 detach: false,
-                args: vec![
-                    "/c".to_string(),
-                    "echo step1 & ping -n 3 127.0.0.1 > nul & echo step2".to_string(),
-                ],
                 cwd: None,
                 stream_output: false,
-                confirmed: true,
             }
         } else {
             RunCommandParams {
-                command: "sh".to_string(),
+                command: "echo step1; sleep 3; echo step2".to_string(),
                 task_id: None,
                 detach: false,
-                args: vec![
-                    "-c".to_string(),
-                    "echo step1; sleep 2; echo step2".to_string(),
-                ],
                 cwd: None,
                 stream_output: false,
-                confirmed: true,
             }
         };
 
@@ -1404,8 +1288,8 @@ mod tests {
             .await
             .unwrap();
         let result1: RunCommandResult = serde_json::from_value(result_value).unwrap();
-        assert!(result1.is_timeout);
-        assert!(result1.stdout.contains("step1"));
+        assert!(result1.is_timeout, "Expected timeout, but got exit_code: {}", result1.exit_code);
+        assert!(result1.stdout.contains("step1"), "stdout doesn't contain 'step1': {:?}", result1.stdout);
         assert!(!result1.stdout.contains("step2"));
         let task_id = result1.task_id;
 
@@ -1419,10 +1303,8 @@ mod tests {
             command: String::new(),
             task_id: Some(task_id),
             detach: false,
-            args: vec![],
             cwd: None,
             stream_output: false,
-            confirmed: true,
         };
 
         let result_value2 = tool
@@ -1442,32 +1324,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_command_pager_protection() {
-        let config = Arc::new(Config::default());
-        let session = Session::new();
-        let context = ToolContext::new(session, config);
+        let (_, _, context) = create_test_context();
         let tool = RunCommandTool::new();
 
-        let is_windows = OperatingSystem::detect() == OperatingSystem::Windows;
-        let params = if is_windows {
-            RunCommandParams {
-                command: "cmd".to_string(),
-                task_id: None,
-                detach: false,
-                args: vec!["/c".to_string(), "echo %PAGER%".to_string()],
-                cwd: None,
-                stream_output: false,
-                confirmed: true,
-            }
-        } else {
-            RunCommandParams {
-                command: "sh".to_string(),
-                task_id: None,
-                detach: false,
-                args: vec!["-c".to_string(), "echo $PAGER".to_string()],
-                cwd: None,
-                stream_output: false,
-                confirmed: true,
-            }
+        let params = RunCommandParams {
+            command: "echo $PAGER".to_string(),
+            task_id: None,
+            detach: false,
+            cwd: None,
+            stream_output: false,
         };
 
         let result_value = tool
@@ -1488,13 +1353,11 @@ mod tests {
         let tool = RunCommandTool::new();
 
         let params = RunCommandParams {
-            command: "less".to_string(),
+            command: "less test.txt".to_string(),
             task_id: None,
             detach: false,
-            args: vec!["test.txt".to_string()],
             cwd: None,
             stream_output: false,
-            confirmed: true,
         };
 
         let result = tool
@@ -1520,10 +1383,8 @@ mod tests {
             command: "cat test.txt | less".to_string(),
             task_id: None,
             detach: false,
-            args: vec![],
             cwd: None,
             stream_output: false,
-            confirmed: true,
         };
 
         let result = tool
@@ -1537,33 +1398,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_command_detach() {
-        let config = Arc::new(Config::default());
-        let session = Session::new();
-        let context = ToolContext::new(session, config);
+        let (_, _, context) = create_test_context();
         let tool = RunCommandTool::new();
-
-        let is_windows = OperatingSystem::detect() == OperatingSystem::Windows;
-        let params = if is_windows {
-            RunCommandParams {
-                command: "cmd".to_string(),
-                task_id: None,
-                detach: true,
-                args: vec!["/c".to_string(), "sleep 5".to_string()],
-                cwd: None,
-                stream_output: false,
-                confirmed: true,
-            }
-        } else {
-            RunCommandParams {
-                command: "sleep".to_string(),
-                task_id: None,
-                detach: true,
-                args: vec!["5".to_string()],
-                cwd: None,
-                stream_output: false,
-                confirmed: true,
-            }
-        };
+        let params = create_detach_sleep_params(5);
 
         let result_value = tool
             .call(serde_json::to_value(&params).unwrap(), context)
@@ -1584,40 +1421,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_background_tasks() {
-        let config = std::sync::Arc::new(Config::default());
-        let session = crate::models::Session::new();
-        let context = ToolContext::new(session, config);
+        let (_config, _session, context) = create_test_context();
 
         let running_processes = std::sync::Arc::new(AtomicUsize::new(0));
-        let history = std::sync::Arc::new(Mutex::new(Vec::new()));
         let processes = std::sync::Arc::new(Mutex::new(HashMap::new()));
 
         let run_tool =
-            RunCommandTool::with_shared_state(running_processes, history, processes.clone());
+            RunCommandTool::with_shared_state(running_processes, processes.clone());
         let list_tool = ListBackgroundTasksTool::new(processes);
 
-        let is_windows = OperatingSystem::detect() == OperatingSystem::Windows;
-        let params = if is_windows {
-            RunCommandParams {
-                command: "cmd".to_string(),
-                task_id: None,
-                detach: true,
-                args: vec!["/c".to_string(), "sleep 5".to_string()],
-                cwd: None,
-                stream_output: false,
-                confirmed: true,
-            }
-        } else {
-            RunCommandParams {
-                command: "sleep".to_string(),
-                task_id: None,
-                detach: true,
-                args: vec!["5".to_string()],
-                cwd: None,
-                stream_output: false,
-                confirmed: true,
-            }
-        };
+        let params = create_detach_sleep_params(5);
 
         // 启动后台任务
         let result_value = run_tool
@@ -1647,39 +1460,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_task_result() {
-        let config = std::sync::Arc::new(Config::default());
-        let session = crate::models::Session::new();
-        let context = ToolContext::new(session, config);
+        let (_, _, context) = create_test_context();
 
         let running_processes = std::sync::Arc::new(AtomicUsize::new(0));
-        let history = std::sync::Arc::new(Mutex::new(Vec::new()));
         let processes = std::sync::Arc::new(Mutex::new(HashMap::new()));
 
         let run_tool =
-            RunCommandTool::with_shared_state(running_processes, history, processes.clone());
+            RunCommandTool::with_shared_state(running_processes, processes.clone());
         let get_tool = GetTaskResultTool::new(processes);
 
-        let is_windows = OperatingSystem::detect() == OperatingSystem::Windows;
-        let params = if is_windows {
-            RunCommandParams {
-                command: "cmd".to_string(),
-                task_id: None,
-                detach: true,
-                args: vec!["/c".to_string(), "echo hello_background".to_string()],
-                cwd: None,
-                stream_output: false,
-                confirmed: true,
-            }
-        } else {
-            RunCommandParams {
-                command: "echo".to_string(),
-                task_id: None,
-                detach: true,
-                args: vec!["hello_background".to_string()],
-                cwd: None,
-                stream_output: false,
-                confirmed: true,
-            }
+        let params = RunCommandParams {
+            command: "echo hello_background".to_string(),
+            task_id: None,
+            detach: true,
+            cwd: None,
+            stream_output: false,
         };
 
         // 启动后台任务
@@ -1709,27 +1504,7 @@ mod tests {
         );
 
         // 验证 kill 功能
-        let params_sleep = if is_windows {
-            RunCommandParams {
-                command: "cmd".to_string(),
-                task_id: None,
-                detach: true,
-                args: vec!["/c".to_string(), "sleep 10".to_string()],
-                cwd: None,
-                stream_output: false,
-                confirmed: true,
-            }
-        } else {
-            RunCommandParams {
-                command: "sleep".to_string(),
-                task_id: None,
-                detach: true,
-                args: vec!["10".to_string()],
-                cwd: None,
-                stream_output: false,
-                confirmed: true,
-            }
-        };
+        let params_sleep = create_detach_sleep_params(10);
 
         let sleep_result_value = run_tool
             .call(
@@ -1753,32 +1528,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_command() {
-        let config = Arc::new(Config::default());
-        let session = Session::new();
-        let context = ToolContext::new(session, config);
+        let (_, _, context) = create_test_context();
         let tool = RunCommandTool::new();
-        let is_windows = OperatingSystem::detect() == OperatingSystem::Windows;
-        let params = if is_windows {
-            RunCommandParams {
-                command: "cmd".to_string(),
-                task_id: None,
-                detach: false,
-                args: vec!["/c".to_string(), "echo hello".to_string()],
-                cwd: None,
-                stream_output: false,
-                confirmed: true,
-            }
-        } else {
-            RunCommandParams {
-                command: "echo".to_string(),
-                task_id: None,
-                detach: false,
-                args: vec!["hello".to_string()],
-                cwd: None,
-                stream_output: false,
-                confirmed: true,
-            }
-        };
+        let params = create_echo_params("hello");
+
         let result_value = tool
             .call(serde_json::to_value(&params).unwrap(), context)
             .await
@@ -1786,8 +1539,5 @@ mod tests {
         let result: RunCommandResult = serde_json::from_value(result_value).unwrap();
         assert_eq!(result.exit_code, 0);
         assert!(result.stdout.contains("hello"));
-        let history = tool.get_history();
-        assert_eq!(history.len(), 1);
-        assert_eq!(history[0].command, params.command);
     }
 }

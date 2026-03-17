@@ -12,6 +12,7 @@ use crate::agent::{
 };
 use crate::error::{Error, Result};
 
+use super::task_manager::{SharedTaskManager, TaskStatus as TaskManagerTaskStatus};
 use super::types::{
     CmaNotification, CmaNotificationType, Orchestrator, OrchestratorConfig, ParallelTasks, TaskId,
     TaskStatus,
@@ -210,12 +211,14 @@ impl OrchestratorExecutor {
     /// # 参数
     /// * `orchestrator` - 总控实例
     /// * `parallel_tasks` - 并行任务配置
+    /// * `task_manager` - 任务管理器（可选）
     ///
     /// # 返回
-    /// 返回任务 ID 和活跃任务管理器
+    /// 返回任务 ID
     pub async fn assign_task_parallel(
         orchestrator: &Orchestrator,
         parallel_tasks: ParallelTasks,
+        task_manager: Option<&SharedTaskManager>,
     ) -> Result<TaskId> {
         debug!(
             orchestrator_id = %orchestrator.id,
@@ -224,30 +227,86 @@ impl OrchestratorExecutor {
             "Assigning tasks in parallel"
         );
 
-        // 注意：在实际实现中，我们需要一个共享状态来管理活跃任务
-        // 这里是简化实现，返回任务 ID
-        // 完整实现需要考虑如何管理 JoinHandle
+        let main_task_id = parallel_tasks.task_id;
+
+        // 如果有 TaskManager，为每个子任务注册
+        if let Some(tm) = task_manager {
+            let mut tm_guard = tm.lock().await;
+
+            for assignment in &parallel_tasks.assignments {
+                tm_guard.register_task(assignment.task_id, assignment.agent_id)?;
+                tm_guard.update_task_status(&assignment.task_id, TaskManagerTaskStatus::Running)?;
+            }
+        }
 
         info!(
             orchestrator_id = %orchestrator.id,
-            task_id = %parallel_tasks.task_id,
+            task_id = %main_task_id,
             "Parallel tasks assigned"
         );
 
-        Ok(parallel_tasks.task_id)
+        Ok(main_task_id)
     }
 
-    /// 查询任务状态（占位实现）
+    /// 查询任务状态
     ///
     /// # 参数
     /// * `orchestrator` - 总控实例
     /// * `task_id` - 任务 ID
+    /// * `task_manager` - 任务管理器（可选）
     ///
     /// # 返回
     /// 返回任务状态或 None
-    pub fn get_task_status(_orchestrator: &Orchestrator, _task_id: &TaskId) -> Option<TaskStatus> {
-        // 占位实现，实际需要维护任务状态
-        Some(TaskStatus::Completed)
+    pub async fn get_task_status(
+        _orchestrator: &Orchestrator,
+        task_id: &TaskId,
+        task_manager: Option<&SharedTaskManager>,
+    ) -> Option<TaskStatus> {
+        if let Some(tm) = task_manager {
+            let tm_guard = tm.lock().await;
+            tm_guard
+                .get_task_status(task_id)
+                .map(|s| match s {
+                    TaskManagerTaskStatus::Pending => TaskStatus::Pending,
+                    TaskManagerTaskStatus::Running => TaskStatus::Running,
+                    TaskManagerTaskStatus::Completed => TaskStatus::Completed,
+                    TaskManagerTaskStatus::Failed => TaskStatus::Failed,
+                    TaskManagerTaskStatus::Cancelled => TaskStatus::Failed, // 映射到 Failed 保持兼容
+                })
+        } else {
+            // 占位实现
+            Some(TaskStatus::Completed)
+        }
+    }
+
+    /// 等待任务完成
+    ///
+    /// # 参数
+    /// * `task_id` - 任务 ID
+    /// * `task_manager` - 任务管理器
+    ///
+    /// # 返回
+    /// 返回任务结果或错误
+    pub async fn wait_for_task(
+        task_id: &TaskId,
+        task_manager: &SharedTaskManager,
+    ) -> Result<AgentTaskResult> {
+        let mut tm_guard = task_manager.lock().await;
+        tm_guard.wait_for_task(task_id).await
+    }
+
+    /// 等待所有任务完成
+    ///
+    /// # 参数
+    /// * `task_manager` - 任务管理器
+    ///
+    /// # 返回
+    /// 返回所有任务的结果
+    pub async fn wait_for_all_tasks(
+        task_manager: &SharedTaskManager,
+    ) -> Vec<(TaskId, Result<AgentTaskResult>)> {
+        let mut tm_guard = task_manager.lock().await;
+        tm_guard.wait_for_all_tasks().await
     }
 
     /// 生成工单
@@ -295,12 +354,14 @@ impl OrchestratorExecutor {
     /// # 参数
     /// * `orchestrator` - 总控实例
     /// * `notification` - CMA 通知
+    /// * `task_manager` - 任务管理器（可选，用于取消相关任务）
     ///
     /// # 返回
     /// 返回更新后的总控或错误
     pub fn handle_cma_notification(
         mut orchestrator: Orchestrator,
         notification: CmaNotification,
+        task_manager: Option<&SharedTaskManager>,
     ) -> Result<Orchestrator> {
         debug!(
             orchestrator_id = %orchestrator.id,
@@ -317,8 +378,27 @@ impl OrchestratorExecutor {
                     reason = %notification.reason,
                     "Processing RollbackAndHandover notification"
                 );
-                // 占位实现：实际需要回退到 checkpoint 并创建新 Agent
-                // 这里先记录日志
+
+                // 如果有 TaskManager，取消该 Session 相关的所有任务
+                if let Some(_tm) = task_manager {
+                    // 注意：这里需要根据 session_id 找到相关任务，
+                    // 目前 TaskManager 没有按 session_id 索引，
+                    // 将来可以扩展 TaskManager 来支持这个功能
+                    info!(
+                        orchestrator_id = %orchestrator.id,
+                        "TaskManager available, but session-based task cancellation not implemented yet"
+                    );
+                }
+
+                // TODO: 完整实现需要：
+                // 1. 回退到指定的 Checkpoint
+                // 2. 恢复 Session 状态
+                // 3. 创建新的 Agent 进行转交
+                // 4. 传递必要的上下文给新 Agent
+                info!(
+                    orchestrator_id = %orchestrator.id,
+                    "RollbackAndHandover placeholder - full implementation pending"
+                );
             }
             CmaNotificationType::ContextTrimmed => {
                 info!(
@@ -326,7 +406,15 @@ impl OrchestratorExecutor {
                     reason = %notification.reason,
                     "Processing ContextTrimmed notification"
                 );
-                // 占位实现：记录上下文已裁剪
+
+                // TODO: 完整实现需要：
+                // 1. 记录上下文已裁剪
+                // 2. 可能需要更新 Session 元数据
+                // 3. 考虑是否需要重新评估路由策略
+                info!(
+                    orchestrator_id = %orchestrator.id,
+                    "ContextTrimmed placeholder - full implementation pending"
+                );
             }
         }
 
@@ -651,7 +739,7 @@ mod tests {
             "Test reason".to_string(),
         );
 
-        let result = OrchestratorExecutor::handle_cma_notification(orchestrator, notification);
+        let result = OrchestratorExecutor::handle_cma_notification(orchestrator, notification, None);
         assert!(result.is_ok());
     }
 }

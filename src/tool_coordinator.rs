@@ -2,11 +2,13 @@
 //!
 //! 负责协调 LLM 和 MCP 工具之间的交互，实现工具调用循环。
 
+use crate::agent::AgentId;
 use crate::checkpoint::CheckpointManager;
 use crate::error::{Error, Result};
 use crate::llm::{ChatMessage, ChatTool, LlmProvider};
 use crate::mcp::{ExecutionResult, McpServerManager, ToolExecutor};
 use crate::models::{Message, MessageRole, Session, Tool, ToolCall, ToolResult};
+use crate::tool_mask::{ToolMask, ToolMaskRepository};
 use crate::tools::{LocalToolRegistry, ToolContext};
 use async_trait::async_trait;
 use serde_json::Value;
@@ -59,6 +61,7 @@ pub struct ToolCoordinator {
     local_tool_registry: Arc<LocalToolRegistry>,
     config: Arc<crate::config::Config>,
     checkpoint_manager: Option<Arc<CheckpointManager>>,
+    tool_mask_repository: Option<Arc<dyn ToolMaskRepository>>,
     /// 最大工具调用轮数
     max_iterations: usize,
 }
@@ -79,6 +82,7 @@ impl ToolCoordinator {
             local_tool_registry,
             config,
             checkpoint_manager: None,
+            tool_mask_repository: None,
             max_iterations: 10,
         }
     }
@@ -86,6 +90,15 @@ impl ToolCoordinator {
     /// 设置 CheckpointManager
     pub fn with_checkpoint_manager(mut self, checkpoint_manager: Arc<CheckpointManager>) -> Self {
         self.checkpoint_manager = Some(checkpoint_manager);
+        self
+    }
+
+    /// 设置 ToolMaskRepository
+    pub fn with_tool_mask_repository(
+        mut self,
+        tool_mask_repository: Arc<dyn ToolMaskRepository>,
+    ) -> Self {
+        self.tool_mask_repository = Some(tool_mask_repository);
         self
     }
 
@@ -228,8 +241,8 @@ impl ToolCoordinator {
         Err(Error::Mcp(error_msg))
     }
 
-    /// 获取可用工具列表
-    async fn get_available_tools(&self) -> Vec<(String, Tool)> {
+    /// 获取所有可用工具列表（不过滤）
+    async fn get_all_available_tools(&self) -> Vec<(String, Tool)> {
         let mut tools = Vec::new();
 
         // 添加 MCP 工具
@@ -243,6 +256,68 @@ impl ToolCoordinator {
         }
 
         tools
+    }
+
+    /// 获取 Agent 可见的工具列表（过滤后的）
+    ///
+    /// 如果没有配置 tool_mask_repository，则返回所有工具。
+    /// 如果 Agent 没有 ToolMask 配置，则：
+    /// - MCP 工具默认不可用
+    /// - 本地工具默认可见（只读）
+    pub async fn get_available_tools_for_agent(
+        &self,
+        agent_id: AgentId,
+    ) -> Result<Vec<(String, Tool)>> {
+        // 如果没有配置 tool_mask_repository，返回所有工具
+        let Some(repo) = &self.tool_mask_repository else {
+            return Ok(self.get_all_available_tools().await);
+        };
+
+        // 获取 Agent 的 ToolMask，如果不存在则创建默认的
+        let mask = if repo.exists(agent_id).await? {
+            repo.get(agent_id).await?
+        } else {
+            ToolMask::new(agent_id)
+        };
+
+        // 获取所有工具，然后按服务器分组
+        let manager = self.mcp_server_manager.lock().await;
+        let all_mcp_tools = manager.all_tools();
+
+        // 按服务器名称分组 MCP 工具
+        let mut mcp_tools_by_server: std::collections::HashMap<String, Vec<(String, Tool)>> =
+            std::collections::HashMap::new();
+        for (server_name, tool) in all_mcp_tools {
+            mcp_tools_by_server
+                .entry(server_name.clone())
+                .or_insert_with(Vec::new)
+                .push((server_name, tool));
+        }
+        drop(manager);
+
+        let mut tools = Vec::new();
+
+        // 过滤 MCP 工具
+        for (server_name, server_tools) in mcp_tools_by_server {
+            let filtered = mask.filter_mcp_tools(&server_name, server_tools);
+            tools.extend(filtered);
+        }
+
+        // 添加本地工具（本地工具总是可见）
+        let local_tools = self.local_tool_registry.list_tools();
+        let local_tools_with_names: Vec<_> = local_tools
+            .into_iter()
+            .map(|t| (t.name.clone(), t))
+            .collect();
+        let filtered_local = mask.filter_local_tools(local_tools_with_names);
+        tools.extend(filtered_local);
+
+        Ok(tools)
+    }
+
+    /// 获取可用工具列表（不过滤，保持向后兼容）
+    async fn get_available_tools(&self) -> Vec<(String, Tool)> {
+        self.get_all_available_tools().await
     }
 
     /// 执行单个工具调用

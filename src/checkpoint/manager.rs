@@ -329,6 +329,24 @@ impl CheckpointManager {
 
     // ==================== 存储相关方法 ====================
 
+    /// 更新 checkpoint 元数据
+    pub async fn update_checkpoint(&self, checkpoint: &Checkpoint) -> Result<()> {
+        let key = self.checkpoint_metadata_key(&checkpoint.session_id, &checkpoint.id);
+        let data = serde_json::to_vec(checkpoint)?;
+        self.agent_fs
+            .kv
+            .set(&key, &data)
+            .await
+            .map_err(|e| CheckpointError::AgentFS(e.to_string()))?;
+
+        info!(
+            checkpoint_id = %checkpoint.id,
+            "Checkpoint updated successfully"
+        );
+
+        Ok(())
+    }
+
     /// 保存 checkpoint 元数据
     async fn save_checkpoint(&self, checkpoint: &Checkpoint) -> Result<()> {
         let key = self.checkpoint_metadata_key(&checkpoint.session_id, &checkpoint.id);

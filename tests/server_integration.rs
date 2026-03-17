@@ -2,26 +2,22 @@
 //!
 //! 测试整个服务器的功能，特别是终端工具的超时和输出读取
 
+use mineclaw::SessionRepository;
 use mineclaw::config::Config;
 use mineclaw::models::*;
 use mineclaw::tools::{
     checkpoint::CheckpointTools, filesystem::FilesystemTool, registry::LocalToolRegistry,
     terminal::TerminalTool,
 };
-use mineclaw::SessionRepository;
 use serde_json::json;
 use std::sync::Arc;
 
 #[tokio::test]
 async fn test_server_health_check() {
-    println!("=== 测试 1: 健康检查 ===");
-
     // 创建测试配置
     let mut config = Config::default();
     config.local_tools.terminal.timeout_seconds = 2;
     config.local_tools.terminal.max_output_bytes = 65536;
-
-    let config_arc = Arc::new(config);
 
     // 初始化测试状态（不启动真实服务器，只测试核心组件）
     let _session_repo = SessionRepository::new();
@@ -36,7 +32,6 @@ async fn test_server_health_check() {
 
     // 验证本地工具已注册
     let tools = local_tool_registry_arc.list_tools();
-    println!("已注册的本地工具: {:?}", tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>());
 
     // 验证终端工具存在
     let has_run_command = tools.iter().any(|t| t.name == "run_command");
@@ -46,14 +41,10 @@ async fn test_server_health_check() {
     assert!(has_run_command, "run_command 工具应该已注册");
     assert!(has_list_background, "list_background_tasks 工具应该已注册");
     assert!(has_get_task, "get_task_result 工具应该已注册");
-
-    println!("✓ 健康检查通过：所有本地工具已正确注册");
 }
 
 #[tokio::test]
 async fn test_terminal_tool_basic_execution() {
-    println!("\n=== 测试 2: 终端工具基本执行 ===");
-
     // 创建测试配置
     let mut config = Config::default();
     config.local_tools.terminal.timeout_seconds = 10;
@@ -73,37 +64,29 @@ async fn test_terminal_tool_basic_execution() {
     let is_windows = cfg!(windows);
     let params = if is_windows {
         json!({
-            "command": "cmd",
-            "args": ["/c", "echo hello from integration test"],
-            "confirmed": true
+            "command": "echo hello from integration test"
         })
     } else {
         json!({
-            "command": "echo",
-            "args": ["hello from integration test"],
-            "confirmed": true
+            "command": "echo hello from integration test"
         })
     };
 
-    let result = local_tool_registry.call_tool("run_command", params, context).await;
-    assert!(result.is_ok(), "命令应该执行成功");
+    let result = local_tool_registry
+        .call_tool("run_command", params, context)
+        .await;
 
     let result_value = result.unwrap();
-    println!("命令执行结果: {:?}", result_value);
 
     let exit_code = result_value["exit_code"].as_i64().unwrap();
     let stdout = result_value["stdout"].as_str().unwrap();
 
     assert_eq!(exit_code, 0, "退出码应该是 0");
     assert!(stdout.contains("hello"), "输出应该包含 'hello'");
-
-    println!("✓ 终端工具基本执行测试通过");
 }
 
 #[tokio::test]
 async fn test_terminal_tool_timeout() {
-    println!("\n=== 测试 3: 终端工具超时功能 ===");
-
     // 创建测试配置 - 设置很短的超时时间
     let mut config = Config::default();
     config.local_tools.terminal.timeout_seconds = 1;
@@ -123,23 +106,20 @@ async fn test_terminal_tool_timeout() {
     let is_windows = cfg!(windows);
     let params = if is_windows {
         json!({
-            "command": "cmd",
-            "args": ["/c", "echo start & ping -n 5 127.0.0.1 > nul & echo end"],
-            "confirmed": true
+            "command": "echo start & ping -n 5 127.0.0.1 > nul & echo end"
         })
     } else {
         json!({
-            "command": "sh",
-            "args": ["-c", "echo start; sleep 5; echo end"],
-            "confirmed": true
+            "command": "echo start; sleep 5; echo end"
         })
     };
 
-    let result = local_tool_registry.call_tool("run_command", params, context).await;
+    let result = local_tool_registry
+        .call_tool("run_command", params, context)
+        .await;
     assert!(result.is_ok(), "超时命令应该返回结果（不是错误）");
 
     let result_value = result.unwrap();
-    println!("超时测试结果: {:?}", result_value);
 
     let is_timeout = result_value["is_timeout"].as_bool().unwrap();
     let stdout = result_value["stdout"].as_str().unwrap();
@@ -147,14 +127,10 @@ async fn test_terminal_tool_timeout() {
     assert!(is_timeout, "应该标记为超时");
     assert!(stdout.contains("start"), "应该包含 'start'");
     assert!(!stdout.contains("end"), "不应该包含 'end'");
-
-    println!("✓ 终端工具超时测试通过");
 }
 
 #[tokio::test]
 async fn test_terminal_tool_output_truncation() {
-    println!("\n=== 测试 4: 终端工具输出截断 ===");
-
     // 创建测试配置 - 设置很小的输出限制
     let mut config = Config::default();
     config.local_tools.terminal.timeout_seconds = 10;
@@ -175,37 +151,30 @@ async fn test_terminal_tool_output_truncation() {
     let long_text = "a".repeat(200);
     let params = if is_windows {
         json!({
-            "command": "cmd",
-            "args": ["/c", format!("echo {}", long_text)],
-            "confirmed": true
+            "command": format!("echo {}", long_text)
         })
     } else {
         json!({
-            "command": "echo",
-            "args": [long_text],
-            "confirmed": true
+            "command": format!("echo {}", long_text)
         })
     };
 
-    let result = local_tool_registry.call_tool("run_command", params, context).await;
+    let result = local_tool_registry
+        .call_tool("run_command", params, context)
+        .await;
     assert!(result.is_ok(), "命令应该执行成功");
 
     let result_value = result.unwrap();
-    println!("输出截断测试结果: {:?}", result_value);
 
     let truncated = result_value["truncated"].as_bool().unwrap();
     let stdout = result_value["stdout"].as_str().unwrap();
 
     assert!(truncated, "输出应该被截断");
     assert!(stdout.len() <= 50, "截断后的输出应该不超过限制");
-
-    println!("✓ 终端工具输出截断测试通过");
 }
 
 #[tokio::test]
 async fn test_terminal_tool_detach_and_list() {
-    println!("\n=== 测试 5: 终端工具后台任务管理 ===");
-
     // 创建测试配置
     let mut config = Config::default();
     config.local_tools.terminal.timeout_seconds = 10;
@@ -225,25 +194,22 @@ async fn test_terminal_tool_detach_and_list() {
     let is_windows = cfg!(windows);
     let params = if is_windows {
         json!({
-            "command": "cmd",
-            "args": ["/c", "timeout /t 3"],
-            "detach": true,
-            "confirmed": true
+            "command": "timeout /t 3",
+            "detach": true
         })
     } else {
         json!({
-            "command": "sleep",
-            "args": ["3"],
-            "detach": true,
-            "confirmed": true
+            "command": "sleep 3",
+            "detach": true
         })
     };
 
-    let result = local_tool_registry.call_tool("run_command", params, context.clone()).await;
+    let result = local_tool_registry
+        .call_tool("run_command", params, context.clone())
+        .await;
     assert!(result.is_ok(), "detach 命令应该执行成功");
 
     let result_value = result.unwrap();
-    println!("Detach 结果: {:?}", result_value);
 
     let task_id = result_value["task_id"].as_str().unwrap();
     let exit_code = result_value["exit_code"].as_i64().unwrap();
@@ -252,11 +218,12 @@ async fn test_terminal_tool_detach_and_list() {
     assert_eq!(exit_code, -1, "detach 模式应该返回 exit_code = -1");
 
     // 测试 list_background_tasks
-    let list_result = local_tool_registry.call_tool("list_background_tasks", json!({}), context.clone()).await;
+    let list_result = local_tool_registry
+        .call_tool("list_background_tasks", json!({}), context.clone())
+        .await;
     assert!(list_result.is_ok(), "list_background_tasks 应该执行成功");
 
     let list_value = list_result.unwrap();
-    println!("后台任务列表: {:?}", list_value);
 
     let tasks = list_value["background_tasks"].as_array().unwrap();
     assert!(!tasks.is_empty(), "应该至少有一个后台任务");
@@ -267,22 +234,23 @@ async fn test_terminal_tool_detach_and_list() {
     // 测试 get_task_result - 先等一会儿
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    let get_result = local_tool_registry.call_tool("get_task_result", json!({ "task_id": task_id, "kill": true }), context).await;
+    let get_result = local_tool_registry
+        .call_tool(
+            "get_task_result",
+            json!({ "task_id": task_id, "kill": true }),
+            context,
+        )
+        .await;
     assert!(get_result.is_ok(), "get_task_result 应该执行成功");
 
     let get_value = get_result.unwrap();
-    println!("获取任务结果: {:?}", get_value);
 
     let status = get_value["status"].as_str().unwrap();
     assert_eq!(status, "terminated", "任务应该被终止");
-
-    println!("✓ 终端工具后台任务管理测试通过");
 }
 
 #[tokio::test]
 async fn test_complete_integration_suite() {
-    println!("\n=== 测试 6: 完整集成测试套件 ===");
-
     // 这个测试验证所有组件能够协同工作
     let _config = Config::default();
 
@@ -291,7 +259,6 @@ async fn test_complete_integration_suite() {
 
     // 创建 session
     let session = session_repo.create().await;
-    println!("创建的 Session ID: {}", session.id);
 
     // 验证 session 状态
     assert_eq!(session.state, SessionState::Draft);
@@ -312,26 +279,4 @@ async fn test_complete_integration_suite() {
     // 验证 session 已删除
     let deleted = session_repo.get(&session.id).await;
     assert!(deleted.is_none());
-
-    println!("✓ 完整集成测试套件通过");
-}
-
-#[tokio::test]
-async fn test_phase3_2_terminal_features() {
-    println!("\n=== Phase 3.2 终端工具核心功能验证 ===");
-
-    println!("📋 验证项目:");
-    println!("  ✓ 命令执行功能");
-    println!("  ✓ 输出限制和截断");
-    println!("  ✓ 超时控制和实时快照");
-    println!("  ✓ 任务续航机制");
-    println!("  ✓ 后台任务管理");
-    println!("  ✓ 交互式工具拦截");
-    println!("  ✓ 环境变量抑制");
-    println!("  ✓ 命令黑名单");
-    println!("  ✓ 工作目录限制");
-
-    println!("\n✅ Phase 3.2 终端工具所有核心功能已通过单元测试验证!");
-    println!("   共 14 个专用终端工具测试，全部通过");
-    println!("   整个项目共 192 个测试，全部通过");
 }
