@@ -115,13 +115,13 @@
 
 | Event 名称 | 描述 | Payload (`data` JSON) 示例 |
 | :--- | :--- | :--- |
-| `message_chunk` | 模型文本流式输出 (打字机效果) | `{"text": "这段代码的", "msg_id": "msg_999", "agent_id": "A1"}` |
-| `agent_spawned` | 总控新创建了一个子 Agent | `{"agent_id": "A2", "role": "Coder", "parent_id": "A1", "depth": 1}` |
-| `agent_status` | Agent 内部状态变更 | `{"agent_id": "A2", "status": "thinking"}` *(status: idle, thinking, typing, searching, panicked, celebrating)* |
-| `tool_call_start` | Agent 开始调用外部工具 | `{"agent_id": "A2", "tool_name": "run_terminal", "args": {"cmd": "cargo test"}}` |
-| `tool_call_end` | 工具调用结束返回结果 | `{"agent_id": "A2", "tool_name": "run_terminal", "result_preview": "test result: ok. 1 passed"}` |
-| `work_order_update`| 工单在 Agent 间流转 | `{"order_id": "wo_11", "from": "A1", "to": "A2", "status": "assigned"}` |
-| `cma_alert` | 上下文管理 Agent 发出裁剪或错误告警 | `{"level": "warning", "message": "上下文接近上限，触发自动裁剪", "agent_id": "CMA_1"}` |
+| `assistant_message` | 智能体生成的完整回复消息 (消息级推送) | `{"type": "assistant_message", "agent_id": "A1", "content": "你好，我是老板..."}` |
+| `agent_spawned` | 总控新创建了一个子 Agent | `{"type": "agent_spawned", "agent_id": "A2", "role": "Coder", "parent_id": "A1", "depth": 1}` |
+| `agent_status` | Agent 内部状态变更 (控制像素动作) | `{"type": "agent_status", "agent_id": "A2", "status": "thinking"}` *(status: idle, thinking, typing, searching, panicked, celebrating)* |
+| `tool_call` | Agent 发起工具调用请求 | `{"type": "tool_call", "agent_id": "A2", "tool": "run_terminal", "arguments": {"cmd": "cargo test"}}` |
+| `tool_result` | 工具执行结果返回 | `{"type": "tool_result", "agent_id": "A2", "content": "test result: ok", "is_error": false}` |
+| `work_order_update`| 工单在 Agent 间流转 | `{"type": "work_order_update", "order_id": "wo_11", "from": "A1", "to": "A2", "status": "assigned"}` |
+| `cma_alert` | 上下文管理 Agent 发出告警 | `{"type": "cma_alert", "level": "warning", "message": "触发自动裁剪", "agent_id": "CMA_1"}` |
 
 *(注意：在像素工作室界面中，`agent_spawned` 对应员工入职动画，`agent_status` 对应角色动作，`work_order_update` 对应抛物线信封动画。)*
 

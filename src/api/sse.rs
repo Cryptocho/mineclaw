@@ -39,15 +39,15 @@ impl SseChannel {
 #[async_trait]
 impl ToolCoordinatorCallback for SseChannel {
     async fn on_assistant_message(&self, content: &str) {
-        self.send(SseEvent::assistant_message(content));
+        self.send(SseEvent::assistant_message(None, content));
     }
 
     async fn on_tool_call(&self, tool: &str, arguments: &Value) {
-        self.send(SseEvent::tool_call(tool, arguments.clone()));
+        self.send(SseEvent::tool_call(None, tool, arguments.clone()));
     }
 
     async fn on_tool_result(&self, content: &str, is_error: bool) {
-        self.send(SseEvent::tool_result(content, is_error));
+        self.send(SseEvent::tool_result(None, content, is_error));
     }
 
     async fn on_completed(&self, _final_response: &str) {

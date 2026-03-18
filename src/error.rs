@@ -111,6 +111,48 @@ pub enum Error {
     Internal,
 }
 
+impl Error {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Error::Config(_) => "CONFIG_ERROR",
+            Error::Io(_) => "IO_ERROR",
+            Error::Reqwest(_) => "HTTP_ERROR",
+            Error::SerdeJson(_) => "JSON_ERROR",
+            Error::Regex(_) => "REGEX_ERROR",
+            Error::Walkdir(_) => "WALKDIR_ERROR",
+            Error::AddrParse(_) => "ADDR_PARSE_ERROR",
+            Error::Llm(_) => "LLM_ERROR",
+            Error::SessionNotFound(_) => "SESSION_NOT_FOUND",
+            Error::SessionInvalidState(_) => "SESSION_INVALID_STATE",
+            Error::MessageNotFound(_) => "MESSAGE_NOT_FOUND",
+            Error::InvalidInput(_) => "INVALID_INPUT",
+            Error::InvalidConfig(_) => "INVALID_CONFIG",
+            Error::Mcp(_) => "MCP_ERROR",
+            Error::McpServer { .. } => "MCP_SERVER_ERROR",
+            Error::McpToolNotFound(_) => "MCP_TOOL_NOT_FOUND",
+            Error::McpToolExecution { .. } => "MCP_TOOL_EXECUTION_ERROR",
+            Error::Filesystem(_) => "FILESYSTEM_ERROR",
+            Error::PathNotAllowed(_) => "PATH_NOT_ALLOWED",
+            Error::PathTraversal(_) => "PATH_TRAVERSAL_ERROR",
+            Error::FileTooLarge(_, _) => "FILE_TOO_LARGE",
+            Error::LocalToolNotFound(_) => "LOCAL_TOOL_NOT_FOUND",
+            Error::LocalToolExecution { .. } => "LOCAL_TOOL_EXECUTION_ERROR",
+            Error::ConfirmationRequired { .. } => "CONFIRMATION_REQUIRED",
+            Error::Checkpoint(_) => "CHECKPOINT_ERROR",
+            Error::CheckpointNotFound(_) => "CHECKPOINT_NOT_FOUND",
+            Error::CheckpointAlreadyExists(_) => "CHECKPOINT_EXISTS",
+            Error::CheckpointLimitReached(_, _) => "CHECKPOINT_LIMIT_REACHED",
+            Error::AgentFS(_) => "AGENT_FS_ERROR",
+            Error::AgentNotFound(_) => "AGENT_NOT_FOUND",
+            Error::AgentInvalidConfig(_) => "AGENT_INVALID_CONFIG",
+            Error::AgentExecution(_) => "AGENT_EXECUTION_ERROR",
+            Error::WorkOrder(_) => "WORK_ORDER_ERROR",
+            Error::ToolMaskNotFound(_) => "TOOL_MASK_NOT_FOUND",
+            Error::Internal => "INTERNAL_SERVER_ERROR",
+        }
+    }
+}
+
 // From trait implementations for CheckpointError
 impl From<crate::checkpoint::CheckpointError> for Error {
     fn from(err: crate::checkpoint::CheckpointError) -> Self {
@@ -181,9 +223,14 @@ impl axum::response::IntoResponse for Error {
         };
 
         let message = self.to_string();
+        let code = self.code();
 
         let body = axum::Json(serde_json::json!({
-            "error": message
+            "success": false,
+            "error": {
+                "code": code,
+                "message": message
+            }
         }));
 
         (status, body).into_response()

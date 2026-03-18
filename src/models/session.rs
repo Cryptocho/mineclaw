@@ -463,7 +463,7 @@ impl Default for Session {
 // ============================================================================
 
 /// Session 列表项信息
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SessionInfo {
     pub id: Uuid,
     pub title: Option<String>,
