@@ -11,7 +11,5 @@ pub use executor::*;
 pub use prompt_template::*;
 pub use types::*;
 
-// 从 task_manager 显式导出，避免与 types::TaskStatus 冲突
-pub use task_manager::{
-    SharedTaskManager, TaskInfo, TaskManager, TaskStatus as TaskManagerTaskStatus,
-};
+// 从 task_manager 导出
+pub use task_manager::{SharedTaskManager, TaskInfo, TaskManager};

@@ -14,7 +14,7 @@ use crate::error::{Error, Result};
 use crate::mcp::{McpServerManager, ToolExecutor};
 use crate::tools::LocalToolRegistry;
 
-use super::task_manager::{SharedTaskManager, TaskStatus as TaskManagerTaskStatus};
+use super::task_manager::SharedTaskManager;
 use super::types::{
     CmaNotification, CmaNotificationType, Orchestrator, OrchestratorConfig, ParallelTasks, TaskId,
     TaskStatus,
@@ -313,7 +313,7 @@ impl OrchestratorExecutor {
 
             for assignment in &parallel_tasks.assignments {
                 tm_guard.register_task(assignment.task_id, assignment.agent_id)?;
-                tm_guard.update_task_status(&assignment.task_id, TaskManagerTaskStatus::Running)?;
+                tm_guard.update_task_status(&assignment.task_id, TaskStatus::Running)?;
             }
         }
 
@@ -342,13 +342,7 @@ impl OrchestratorExecutor {
     ) -> Option<TaskStatus> {
         if let Some(tm) = task_manager {
             let tm_guard = tm.lock().await;
-            tm_guard.get_task_status(task_id).map(|s| match s {
-                TaskManagerTaskStatus::Pending => TaskStatus::Pending,
-                TaskManagerTaskStatus::Running => TaskStatus::Running,
-                TaskManagerTaskStatus::Completed => TaskStatus::Completed,
-                TaskManagerTaskStatus::Failed => TaskStatus::Failed,
-                TaskManagerTaskStatus::Cancelled => TaskStatus::Failed, // 映射到 Failed 保持兼容
-            })
+            tm_guard.get_task_status(task_id)
         } else {
             // 占位实现
             Some(TaskStatus::Completed)

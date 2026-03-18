@@ -3,9 +3,7 @@
 //! 负责管理任务的注册、状态跟踪、结果收集和清理。
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fmt;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -13,61 +11,16 @@ use tokio::task::JoinHandle;
 use crate::agent::{AgentId, AgentTaskResult};
 use crate::error::{Error, Result};
 
-use super::types::TaskId;
+use super::types::{TaskId, TaskStatus};
 
-// ==================== 任务状态 ====================
+// ==================== 任务状态辅助方法 ====================
 
-/// 任务状态（增强版）
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TaskStatus {
-    /// 待处理
-    Pending,
-    /// 运行中
-    Running,
-    /// 已完成
-    Completed,
-    /// 失败
-    Failed,
-    /// 已取消
-    Cancelled,
-}
-
-impl TaskStatus {
-    /// 检查任务是否处于终态
-    pub fn is_terminal(&self) -> bool {
-        matches!(
-            self,
-            TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled
-        )
-    }
-
-    /// 检查任务是否正在运行
-    pub fn is_running(&self) -> bool {
-        matches!(self, TaskStatus::Running)
-    }
-}
-
-impl fmt::Display for TaskStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TaskStatus::Pending => write!(f, "Pending"),
-            TaskStatus::Running => write!(f, "Running"),
-            TaskStatus::Completed => write!(f, "Completed"),
-            TaskStatus::Failed => write!(f, "Failed"),
-            TaskStatus::Cancelled => write!(f, "Cancelled"),
-        }
-    }
-}
-
-impl From<super::types::TaskStatus> for TaskStatus {
-    fn from(status: super::types::TaskStatus) -> Self {
-        match status {
-            super::types::TaskStatus::Pending => TaskStatus::Pending,
-            super::types::TaskStatus::Running => TaskStatus::Running,
-            super::types::TaskStatus::Completed => TaskStatus::Completed,
-            super::types::TaskStatus::Failed => TaskStatus::Failed,
-        }
-    }
+/// 检查任务是否处于终态
+fn is_terminal_status(status: &TaskStatus) -> bool {
+    matches!(
+        status,
+        TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled
+    )
 }
 
 // ==================== 任务信息 ====================
@@ -110,7 +63,7 @@ impl TaskInfo {
 
     /// 标记任务为运行中
     pub fn mark_running(&mut self) {
-        if !self.status.is_terminal() {
+        if !is_terminal_status(&self.status) {
             self.status = TaskStatus::Running;
             self.started_at = Some(Utc::now());
         }
@@ -118,7 +71,7 @@ impl TaskInfo {
 
     /// 标记任务为已完成
     pub fn mark_completed(&mut self, result: AgentTaskResult) {
-        if !self.status.is_terminal() {
+        if !is_terminal_status(&self.status) {
             self.status = TaskStatus::Completed;
             self.result = Some(result);
             self.completed_at = Some(Utc::now());
@@ -127,7 +80,7 @@ impl TaskInfo {
 
     /// 标记任务为失败
     pub fn mark_failed(&mut self, error: String) {
-        if !self.status.is_terminal() {
+        if !is_terminal_status(&self.status) {
             self.status = TaskStatus::Failed;
             self.error = Some(error);
             self.completed_at = Some(Utc::now());
@@ -136,7 +89,7 @@ impl TaskInfo {
 
     /// 标记任务为已取消
     pub fn mark_cancelled(&mut self) {
-        if !self.status.is_terminal() {
+        if !is_terminal_status(&self.status) {
             self.status = TaskStatus::Cancelled;
             self.completed_at = Some(Utc::now());
         }
@@ -247,7 +200,7 @@ impl TaskManager {
             .get_mut(task_id)
             .ok_or_else(|| Error::InvalidConfig(format!("Task {} not found", task_id)))?;
 
-        if task.status.is_terminal() {
+        if is_terminal_status(&task.status) {
             return Err(Error::InvalidConfig(format!(
                 "Cannot update status of terminal task {}",
                 task_id
@@ -284,7 +237,7 @@ impl TaskManager {
             .get_mut(task_id)
             .ok_or_else(|| Error::InvalidConfig(format!("Task {} not found", task_id)))?;
 
-        if task.status.is_terminal() {
+        if is_terminal_status(&task.status) {
             return Err(Error::InvalidConfig(format!(
                 "Cannot store result for terminal task {}",
                 task_id
@@ -431,7 +384,7 @@ impl TaskManager {
         let tasks_to_remove: Vec<TaskId> = self
             .tasks
             .iter()
-            .filter(|(_, task)| task.status.is_terminal())
+            .filter(|(_, task)| is_terminal_status(&task.status))
             .map(|(id, _)| *id)
             .collect();
 

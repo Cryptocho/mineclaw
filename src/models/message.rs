@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::agent::AgentId;
+
 /// 工具定义
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Tool {
@@ -49,6 +51,8 @@ pub struct Message {
     pub tool_result: Option<ToolResult>,
     /// 关联的 checkpoint ID（可选）
     pub checkpoint_id: Option<String>,
+    /// 发送该消息的 Agent ID（可选，None 表示用户/系统消息）
+    pub agent_id: Option<AgentId>,
 }
 
 impl Message {
@@ -63,6 +67,7 @@ impl Message {
             tool_calls: None,
             tool_result: None,
             checkpoint_id: None,
+            agent_id: None,
         }
     }
 
@@ -83,6 +88,11 @@ impl Message {
 
     pub fn with_checkpoint_id(mut self, checkpoint_id: String) -> Self {
         self.checkpoint_id = Some(checkpoint_id);
+        self
+    }
+
+    pub fn with_agent_id(mut self, agent_id: AgentId) -> Self {
+        self.agent_id = Some(agent_id);
         self
     }
 }
@@ -163,6 +173,7 @@ mod tests {
         assert!(msg.tool_calls.is_none());
         assert!(msg.tool_result.is_none());
         assert!(msg.checkpoint_id.is_none());
+        assert!(msg.agent_id.is_none());
     }
 
     #[test]
@@ -316,6 +327,33 @@ mod tests {
     }
 
     #[test]
+    fn test_with_agent_id() {
+        let session_id = Uuid::new_v4();
+        let agent_id = AgentId::new();
+
+        let msg = Message::new(session_id, MessageRole::Assistant, "hello".to_string())
+            .with_agent_id(agent_id);
+
+        assert_eq!(msg.agent_id, Some(agent_id));
+    }
+
+    #[test]
+    fn test_message_with_agent_id_serialization() {
+        let session_id = Uuid::new_v4();
+        let agent_id = AgentId::new();
+
+        let msg = Message::new(session_id, MessageRole::Assistant, "hello".to_string())
+            .with_agent_id(agent_id);
+
+        let serialized = serde_json::to_string(&msg).unwrap();
+        let deserialized: Message = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(msg.id, deserialized.id);
+        assert_eq!(msg.role, deserialized.role);
+        assert_eq!(deserialized.agent_id, Some(agent_id));
+    }
+
+    #[test]
     fn test_chained_builders() {
         let session_id = Uuid::new_v4();
         let tool_call = ToolCall {
@@ -325,14 +363,17 @@ mod tests {
         };
         let metadata = json!({"key": "value"});
         let checkpoint_id = "checkpoint_789".to_string();
+        let agent_id = AgentId::new();
 
         let msg = Message::new(session_id, MessageRole::ToolCall, "".to_string())
             .with_metadata(metadata.clone())
             .with_tool_calls(vec![tool_call])
-            .with_checkpoint_id(checkpoint_id.clone());
+            .with_checkpoint_id(checkpoint_id.clone())
+            .with_agent_id(agent_id);
 
         assert_eq!(msg.metadata, Some(metadata));
         assert!(msg.tool_calls.is_some());
         assert_eq!(msg.checkpoint_id, Some(checkpoint_id));
+        assert_eq!(msg.agent_id, Some(agent_id));
     }
 }

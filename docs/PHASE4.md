@@ -1,147 +1,5 @@
 # MineClaw Phase 4: 多 Agent 基础架构 详细设计
 
-## 📊 当前状态更新（2026.3.17）
-
-- **Phase 4.5 上下文管理 Agent (CMA) 核心实现完成**：实现了上下文存储、裁剪策略（FIFO/优先级/混合）、持续犯错检测以及专用的 ContextManagerAgent。支持 Agent 求助（触发点 1）和上下文长度自动监控（触发点 2）。
-
-**Phase 4.1: Agent 基础定义** - ✅ **完成**
-- 所有核心数据结构和功能实现
-- 119 个单元测试全部通过
-
-**Phase 4.2: 总控机制** - ✅ **核心完成** + ✅ **TaskManager 完成**
-- 核心功能：主总控/子总控创建、Agent 管理、串行任务分配、工单生成
-- ✅ **TaskManager 完整实现**：
-  - 基础数据结构：TaskStatus, TaskInfo, TaskManager
-  - 核心方法：register_task, update_task_status, store_task_result
-  - 任务管理：cancel_task, cleanup_completed_tasks
-  - 任务等待：wait_for_task, wait_for_all_tasks
-  - JoinHandle 管理：register_join_handle, get_join_handle
-- ✅ **OrchestratorExecutor 集成**：
-  - assign_task_parallel() 支持 TaskManager
-  - get_task_status() 支持 TaskManager
-  - 新增 wait_for_task() 和 wait_for_all_tasks() 方法
-  - handle_cma_notification() 增强（支持 TaskManager 参数）
-- 50+ 个单元测试全部通过
-
-**Phase 4.3: Checkpoint 与会话增强** - ✅ **完成**
-- Session 状态机、生命周期事件、Checkpoint 强关联
-- SessionRepository 完整实现
-- 60+ 个单元测试全部通过
-
-**Phase 4.4: 工具掩码基础机制** - ✅ **完成**
-- 简化的工具权限类型：McpToolPermission, LocalToolPermission, LocalToolMode
-- ToolMask 结构和 ToolMaskRepository trait 完整实现
-- InMemoryToolMaskRepository 内存实现
-- 工具过滤逻辑：Agent 只能看到有权限的工具
-- 与 ToolCoordinator 集成：get_available_tools_for_agent() 方法
-- 191 个单元测试全部通过（包括新增的工具掩码测试）
-
-**调整优先级：先完善 Phase 4.2 的 TaskManager**
-- 原计划：下一步 Phase 4.5 - 上下文管理 Agent（基础版）
-- 调整后：先完善 TaskManager 和并行任务功能，再继续 Phase 4.5
-
----
-
-## 🎉 TaskManager 实现完成总结（2026.3.17）
-
-### 概述
-成功实现了完整的 TaskManager 架构，并集成到 Orchestrator 中，解决了原有的占位实现问题。
-
-### 完成的工作
-
-#### 1. 数据结构设计
-- **TaskStatus 枚举（增强版）**：
-  - `Pending`, `Running`, `Completed`, `Failed`, `Cancelled`
-  - 辅助方法：`is_terminal()`, `is_running()`
-  - 支持与现有 types::TaskStatus 相互转换
-
-- **TaskInfo 结构体**：
-  - 包含任务 ID、Agent ID、状态、结果、错误信息
-  - 时间戳：创建时间、开始时间、完成时间
-  - 状态转换方法：`mark_running()`, `mark_completed()`, `mark_failed()`, `mark_cancelled()`
-
-- **TaskManager 结构体**：
-  - `tasks`: 任务信息映射
-  - `join_handles`: 活跃任务的 JoinHandle
-  - `tasks_by_agent`: 按 Agent ID 索引的任务列表
-  - `SharedTaskManager`: 线程安全的包装器（Arc<Mutex<TaskManager>>）
-
-#### 2. 核心方法实现
-- **任务注册与查询**：
-  - `register_task()` - 注册新任务并建立索引
-  - `get_task()` / `get_task_mut()` - 获取任务信息
-  - `get_task_status()` - 获取任务状态
-  - `contains_task()` - 检查任务是否存在
-  - `get_tasks_for_agent()` - 获取指定 Agent 的所有任务
-  - `list_tasks()` - 列出所有任务
-  - `task_count()` - 获取任务总数
-
-- **状态更新**：
-  - `update_task_status()` - 更新任务状态
-  - `store_task_result()` - 存储任务结果并更新状态
-
-- **JoinHandle 管理**：
-  - `register_join_handle()` - 注册任务的 JoinHandle
-  - `get_join_handle()` - 获取任务的 JoinHandle
-  - `has_active_join_handle()` - 检查是否有活跃的 JoinHandle
-
-#### 3. 任务管理功能
-- **取消任务**：
-  - `cancel_task()` - 取消任务并 abort JoinHandle
-- **清理任务**：
-  - `cleanup_completed_tasks()` - 清理已完成的任务
-  - `remove_task()` - 内部方法，清理所有相关数据
-
-#### 4. 任务等待功能
-- **等待单个任务**：
-  - `wait_for_task()` - 等待单个任务完成，支持已完成和运行中的任务
-- **等待所有任务**：
-  - `wait_for_all_tasks()` - 等待所有活跃任务完成
-
-#### 5. OrchestratorExecutor 集成
-- **修改现有方法**：
-  - `assign_task_parallel()` - 接受 TaskManager 参数，注册子任务
-  - `get_task_status()` - 从 TaskManager 查询任务状态
-  - `handle_cma_notification()` - 接受 TaskManager 参数（可选）
-
-- **新增方法**：
-  - `wait_for_task()` - 暴露 TaskManager 的等待功能
-  - `wait_for_all_tasks()` - 暴露等待所有任务的功能
-
-### 架构设计决策
-
-#### 独立 TaskManager 架构
-采用了**独立 TaskManager 架构**，而不是将功能直接集成到 Orchestrator 中：
-
-| 优点 | 说明 |
-|------|------|
-| **职责分离清晰** | Orchestrator 专注于 Agent 管理、任务分配决策、工单处理<br>TaskManager 专注于任务生命周期、状态跟踪、结果收集 |
-| **符合 SRP** | 单一职责原则，每个组件只做一件事 |
-| **易于测试** | TaskManager 可以独立测试，不需要完整的 Orchestrator<br>Orchestrator 可以 mock TaskManager 进行测试 |
-| **灵活性高** | TaskManager 可以被多个 Orchestrator 共享（如果需要）<br>可以替换不同的 TaskManager 实现（内存 vs 持久化） |
-| **并发控制集中** | 所有并发原语（Mutex, Condvar 等）都集中在 TaskManager 中<br>Orchestrator 保持单线程逻辑，更容易理解<br>死锁风险更容易分析和避免 |
-
-### 验证结果
-- ✅ `cargo build` 通过，无警告无错误
-- ✅ `cargo test` 通过，**所有 191 个测试全部通过**！
-- ✅ 代码符合 Rust 最佳实践
-- ✅ 保持了向后兼容性（TaskManager 参数为可选）
-
-### 文件修改清单
-- `src/orchestrator/task_manager.rs` - 新增，TaskManager 完整实现
-- `src/orchestrator/executor.rs` - 修改，集成 TaskManager
-- `src/orchestrator/mod.rs` - 修改，导出新模块
-- `docs/PHASE4_inprogress.md` - 更新，记录完成的工作
-
-### 后续工作
-TaskManager 的基础功能已完成，后续可以：
-1. 继续 Phase 4.5（上下文管理 Agent）
-2. 编写 TaskManager 的单元测试
-3. 实现完整的 Checkpoint 回退和 Agent 转交逻辑
-4. 添加按 Session ID 索引的任务查询功能
-5. 实现任务持久化功能
-
----
 
 ## 概述
 
@@ -543,7 +401,6 @@ TaskManager 的基础功能已完成，后续可以：
 - nested_depth: u8（嵌套深度，Master 为 0）
 - parent_orchestrator_id: Option<OrchestratorId>（父总控 ID）
 - managed_agents: HashMap<AgentId, Agent>
-- active_tasks: HashMap<TaskId, JoinHandle<Result<AgentTaskResult, Error>>>
 - session_id: Option<SessionId>
 - created_at: DateTime<Utc>
 - updated_at: DateTime<Utc>
@@ -571,6 +428,8 @@ TaskManager 的基础功能已完成，后续可以：
 - wait_for_all: bool（是否等待所有任务完成）
 
 （WorkOrder 统一定义见 Phase 4.1）
+
+
 
 **CmaNotification（CMA 通知）**
 - notification_type: CmaNotificationType
@@ -642,11 +501,12 @@ TaskManager 的基础功能已完成，后续可以：
 - 清理 active_tasks
 - 返回所有结果
 
-**总控取消任务**
-- 输入：mut Orchestrator, TaskId
-- 输出：Result<Orchestrator, Error>
+**TaskManager 取消任务（基础设施预留）**
+- 输入：&amp;mut TaskManager, TaskId
+- 输出：Result&lt;(), Error&gt;
 - abort JoinHandle
-- 清理 active_tasks
+- 更新任务状态为 Cancelled
+- 说明：此功能为 Phase 7-8 前端 API 预留，Agent 不直接调用取消任务
 
 **总控生成工单**
 - 输入：&Orchestrator, WorkOrderType, WorkOrderRecipient, title, content
@@ -689,7 +549,7 @@ TaskManager 的基础功能已完成，后续可以：
 - [x] 总控可以并行分配任务
 - [x] 总控可以查询任务状态
 - [x] 总控可以等待任务完成
-- [x] 总控可以取消任务（通过 TaskManager）
+- [x] TaskManager 支持取消任务（基础设施预留，供 Phase 7-8 API 使用）
 - [x] 总控可以生成工单
 - [x] 总控可以处理 CMA 通知
 - [x] 多个并行任务正常工作
@@ -713,6 +573,7 @@ TaskManager 的基础功能已完成，后续可以：
 - [x] 实现 Session 删除流程
 - [x] 实现 Session 与总控的关联
 - [x] 实现 Session 与 Checkpoint 的强关联
+- [x] **按 Agent 分组的 Checkpoint 列表**
 - [x] 定义 Checkpoint 归档策略
 - [x] 实现 Checkpoint 跟随 Session 生命周期
 - [x] 实现 Checkpoint 清理策略
@@ -741,6 +602,7 @@ TaskManager 的基础功能已完成，后续可以：
 - current_checkpoint_id: Option<CheckpointId>（新增）
 - archived_at: Option<DateTime<Utc>>（新增）
 - metadata: HashMap<String, String>（新增，灵活的元数据）
+- **agent_checkpoints: HashMap<AgentId, Vec<CheckpointId>>（新增，按 Agent 分组的 Checkpoint 列表）**
 
 **SessionLifecycleEvent**
 - 枚举类型，定义 Session 生命周期事件
@@ -748,10 +610,11 @@ TaskManager 的基础功能已完成，后续可以：
 - 包含事件时间戳
 - 包含触发者信息
 
-**Checkpoint（增强版 - 如果需要）**
+**Checkpoint**
 - session_id: SessionId（确保存在）
-- is_archived: bool（新增）
-- archived_at: Option<DateTime<Utc>>（新增）
+- agent_id: Option&lt;AgentId&gt;（创建该 Checkpoint 的 Agent）
+- is_archived: bool
+- archived_at: Option&lt;DateTime&lt;Utc&gt;&gt;
 
 **SessionRepository**
 - 存储所有 Session 实例
@@ -855,6 +718,8 @@ TaskManager 的基础功能已完成，后续可以：
 - 单元测试：Session 状态机、CRUD 操作
 - 集成测试：Session 与总控的协作
 - 集成测试：Session 与 Checkpoint 的集成
+- **集成测试：按 Agent 分组的 Checkpoint 管理**
+- **集成测试：Agent 起始 Checkpoint 记录与回退**
 - 回归测试：确保现有功能不受影响
 
 #### 验收标准
@@ -870,6 +735,8 @@ TaskManager 的基础功能已完成，后续可以：
 - [x] 可以按状态、总控过滤 Session
 - [x] 可以查询 Session 的生命周期历史
 - [x] 可以恢复到指定的 Checkpoint
+- [x] **可以按 Agent 查询其创建的 Checkpoint 列表**
+- [x] **可以回退到 Agent 接手时的状态**
 - [x] 可以清理过期的 Checkpoint
 - [x] 软删除的 Session 不再出现在正常列表中
 - [x] 永久删除的 Session 及其 Checkpoint 被完全清理

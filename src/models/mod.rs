@@ -166,9 +166,9 @@ impl SessionRepository {
         if let Some(checkpoint_manager) = &self.checkpoint_manager {
             if let Ok(checkpoint) = checkpoint_manager
                 .create_checkpoint(
-                    &session,
+                    session.id,
                     Some("Initial checkpoint".to_string()),
-                    crate::models::checkpoint::CheckpointType::Auto,
+                    None,
                     None,
                 )
                 .await

@@ -5,7 +5,7 @@
 use super::{LocalTool, ToolContext};
 use crate::config::FilesystemConfig;
 use crate::error::{Error, Result};
-use crate::models::checkpoint::CheckpointType;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -73,23 +73,23 @@ async fn maybe_create_checkpoint(
     context: &ToolContext,
     affected_files: Vec<String>,
     description: Option<String>,
-) -> Result<()> {
+) -> Result<Option<String>> {
     // 检查是否有 checkpoint manager
     let Some(checkpoint_manager) = &context.checkpoint_manager else {
         debug!("Checkpoint manager not available, skipping checkpoint creation");
-        return Ok(());
+        return Ok(None);
     };
 
     // 检查 checkpoint 是否启用
     if !checkpoint_manager.config().enabled {
         debug!("Checkpoint is disabled in config");
-        return Ok(());
+        return Ok(None);
     }
 
     // 只有在有受影响文件时才创建 checkpoint
     if affected_files.is_empty() {
         debug!("No affected files, skipping checkpoint");
-        return Ok(());
+        return Ok(None);
     }
 
     debug!(
@@ -98,16 +98,16 @@ async fn maybe_create_checkpoint(
     );
 
     // 创建 checkpoint
-    checkpoint_manager
+    let checkpoint = checkpoint_manager
         .create_checkpoint(
-            &context.session,
+            context.session.id,
             description,
-            CheckpointType::Auto,
             Some(affected_files),
+            context.agent_id,
         )
         .await?;
 
-    Ok(())
+    Ok(Some(checkpoint.id))
 }
 
 /// 在单个文件中搜索模式

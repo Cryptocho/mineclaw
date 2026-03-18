@@ -5,6 +5,7 @@ use std::fmt;
 use uuid::Uuid;
 
 use super::message::Message;
+use crate::agent::types::AgentId;
 use crate::error::{Error, Result};
 use crate::orchestrator::OrchestratorId;
 
@@ -186,6 +187,9 @@ pub struct Session {
     /// 生命周期事件历史
     #[serde(default)]
     pub lifecycle_events: Vec<SessionLifecycleEvent>,
+    /// 按 Agent 分组的 Checkpoint 列表（FIFO 存储，索引）
+    #[serde(default)]
+    pub agent_checkpoints: HashMap<AgentId, Vec<String>>,
 }
 
 impl Session {
@@ -206,6 +210,7 @@ impl Session {
             messages: Vec::new(),
             metadata: HashMap::new(),
             lifecycle_events: Vec::new(),
+            agent_checkpoints: HashMap::new(),
         };
 
         // 添加 Created 事件
@@ -328,13 +333,8 @@ impl Session {
             };
 
             checkpoint = Some(
-                cm.create_checkpoint(
-                    self,
-                    description,
-                    crate::models::checkpoint::CheckpointType::Auto,
-                    None,
-                )
-                .await?,
+                cm.create_checkpoint(self.id, description, None, None)
+                    .await?,
             );
         }
 
@@ -449,6 +449,39 @@ impl Session {
     /// 检查是否可以修改
     pub fn can_modify(&self) -> bool {
         self.state.is_active()
+    }
+
+    /// 添加 Checkpoint 索引（仅更新内存中的索引）
+    pub fn add_checkpoint_index(&mut self, agent_id: AgentId, checkpoint_id: String) {
+        self.agent_checkpoints
+            .entry(agent_id)
+            .or_default()
+            .push(checkpoint_id);
+    }
+
+    /// 获取 Agent 的 Checkpoint ID 列表（从索引读取）
+    pub fn get_checkpoint_ids_for_agent(&self, agent_id: &AgentId) -> Vec<String> {
+        self.agent_checkpoints
+            .get(agent_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// 获取 Agent 的起始 Checkpoint ID（直接拿第一个）
+    pub fn get_agent_start_checkpoint_id(&self, agent_id: &AgentId) -> Option<&String> {
+        self.agent_checkpoints
+            .get(agent_id)
+            .and_then(|ids| ids.first())
+    }
+
+    /// 清空所有 Checkpoint 索引（Session 归档/删除时调用）
+    pub fn clear_checkpoint_indexes(&mut self) {
+        self.agent_checkpoints.clear();
+    }
+
+    /// 添加 Checkpoint 到 Agent 的列表（保留向后兼容）
+    pub fn add_checkpoint_for_agent(&mut self, agent_id: AgentId, checkpoint_id: String) {
+        self.add_checkpoint_index(agent_id, checkpoint_id);
     }
 }
 

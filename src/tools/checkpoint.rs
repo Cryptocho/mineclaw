@@ -33,8 +33,8 @@ pub struct CheckpointInfo {
     pub id: String,
     pub created_at: String,
     pub description: Option<String>,
-    pub checkpoint_type: String,
     pub file_count: usize,
+    pub agent_id: Option<String>,
 }
 
 /// 恢复 checkpoint 参数
@@ -109,8 +109,8 @@ impl LocalTool for ListCheckpointsTool {
                 id: item.id,
                 created_at: item.created_at.to_rfc3339(),
                 description: item.description,
-                checkpoint_type: format!("{:?}", item.checkpoint_type),
                 file_count: item.file_count,
+                agent_id: item.agent_id.map(|a| a.to_string()),
             })
             .collect();
 

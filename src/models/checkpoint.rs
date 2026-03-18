@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::fmt;
 use uuid::Uuid;
 
+use crate::agent::types::AgentId;
+
 // ============================================================================
 // CheckpointArchivingStrategy - Checkpoint 归档策略
 // ============================================================================
@@ -78,15 +80,6 @@ impl Default for CheckpointArchivingStrategy {
     }
 }
 
-/// Checkpoint 类型
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum CheckpointType {
-    /// 自动创建的 checkpoint
-    Auto,
-    /// 手动创建的 checkpoint
-    Manual,
-}
-
 /// 文件信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileInfo {
@@ -107,16 +100,14 @@ pub struct Checkpoint {
     pub id: String,
     /// 所属会话 ID
     pub session_id: Uuid,
+    /// 创建该 Checkpoint 的 Agent ID
+    pub agent_id: Option<AgentId>,
     /// 创建时间
     pub created_at: DateTime<Utc>,
     /// 描述
     pub description: Option<String>,
-    /// Checkpoint 类型
-    pub checkpoint_type: CheckpointType,
     /// 受影响的文件列表
     pub affected_files: Vec<FileInfo>,
-    /// 父 checkpoint ID（用于构建 checkpoint 树）
-    pub parent_id: Option<String>,
     /// 元数据
     pub metadata: Option<serde_json::Value>,
     /// 是否已归档
@@ -128,19 +119,14 @@ pub struct Checkpoint {
 
 impl Checkpoint {
     /// 创建新的 Checkpoint
-    pub fn new(
-        session_id: Uuid,
-        checkpoint_type: CheckpointType,
-        description: Option<String>,
-    ) -> Self {
+    pub fn new(session_id: Uuid, description: Option<String>) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
             session_id,
+            agent_id: None,
             created_at: Utc::now(),
             description,
-            checkpoint_type,
             affected_files: Vec::new(),
-            parent_id: None,
             metadata: None,
             is_archived: false,
             archived_at: None,
@@ -166,15 +152,15 @@ impl Checkpoint {
         self
     }
 
-    /// 设置父 checkpoint
-    pub fn with_parent_id(mut self, parent_id: String) -> Self {
-        self.parent_id = Some(parent_id);
-        self
-    }
-
     /// 设置元数据
     pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
         self.metadata = Some(metadata);
+        self
+    }
+
+    /// 设置创建该 Checkpoint 的 Agent
+    pub fn with_agent_id(mut self, agent_id: AgentId) -> Self {
+        self.agent_id = Some(agent_id);
         self
     }
 }
@@ -196,9 +182,8 @@ pub struct CheckpointListItem {
     pub id: String,
     pub created_at: DateTime<Utc>,
     pub description: Option<String>,
-    pub checkpoint_type: CheckpointType,
     pub file_count: usize,
-    pub parent_id: Option<String>,
+    pub agent_id: Option<AgentId>,
 }
 
 impl From<&Checkpoint> for CheckpointListItem {
@@ -207,9 +192,8 @@ impl From<&Checkpoint> for CheckpointListItem {
             id: checkpoint.id.clone(),
             created_at: checkpoint.created_at,
             description: checkpoint.description.clone(),
-            checkpoint_type: checkpoint.checkpoint_type.clone(),
             file_count: checkpoint.affected_files.len(),
-            parent_id: checkpoint.parent_id.clone(),
+            agent_id: checkpoint.agent_id,
         }
     }
 }
@@ -226,7 +210,6 @@ pub struct ListCheckpointsResponse {
 pub struct CreateCheckpointRequest {
     pub session_id: Uuid,
     pub description: Option<String>,
-    pub checkpoint_type: Option<CheckpointType>,
     pub affected_files: Option<Vec<String>>,
 }
 
@@ -275,18 +258,13 @@ mod tests {
     #[test]
     fn test_checkpoint_new() {
         let session_id = Uuid::new_v4();
-        let checkpoint = Checkpoint::new(
-            session_id,
-            CheckpointType::Manual,
-            Some("Test checkpoint".to_string()),
-        );
+        let checkpoint = Checkpoint::new(session_id, Some("Test checkpoint".to_string()));
 
         assert_eq!(checkpoint.session_id, session_id);
-        assert_eq!(checkpoint.checkpoint_type, CheckpointType::Manual);
         assert_eq!(checkpoint.description, Some("Test checkpoint".to_string()));
         assert!(checkpoint.affected_files.is_empty());
-        assert!(checkpoint.parent_id.is_none());
         assert!(checkpoint.metadata.is_none());
+        assert!(checkpoint.agent_id.is_none());
     }
 
     #[test]
@@ -299,8 +277,8 @@ mod tests {
             content_hash: None,
         };
 
-        let checkpoint = Checkpoint::new(session_id, CheckpointType::Auto, None)
-            .with_affected_files(vec![file_info.clone()]);
+        let checkpoint =
+            Checkpoint::new(session_id, None).with_affected_files(vec![file_info.clone()]);
 
         assert_eq!(checkpoint.affected_files.len(), 1);
         assert_eq!(checkpoint.affected_files[0].path, "test.txt");
@@ -308,59 +286,45 @@ mod tests {
     }
 
     #[test]
-    fn test_checkpoint_with_parent_id() {
-        let session_id = Uuid::new_v4();
-        let parent_id = "parent_123".to_string();
-
-        let checkpoint = Checkpoint::new(session_id, CheckpointType::Manual, None)
-            .with_parent_id(parent_id.clone());
-
-        assert_eq!(checkpoint.parent_id, Some(parent_id));
-    }
-
-    #[test]
     fn test_checkpoint_with_metadata() {
         let session_id = Uuid::new_v4();
         let metadata = json!({"key": "value"});
 
-        let checkpoint = Checkpoint::new(session_id, CheckpointType::Manual, None)
-            .with_metadata(metadata.clone());
+        let checkpoint = Checkpoint::new(session_id, None).with_metadata(metadata.clone());
 
         assert_eq!(checkpoint.metadata, Some(metadata));
     }
 
     #[test]
-    fn test_checkpoint_type_serialization() {
-        let types = vec![CheckpointType::Auto, CheckpointType::Manual];
+    fn test_checkpoint_with_agent_id() {
+        let session_id = Uuid::new_v4();
+        let agent_id = AgentId::new();
 
-        for checkpoint_type in types {
-            let serialized = serde_json::to_string(&checkpoint_type).unwrap();
-            let deserialized: CheckpointType = serde_json::from_str(&serialized).unwrap();
-            assert_eq!(checkpoint_type, deserialized);
-        }
+        let checkpoint = Checkpoint::new(session_id, None).with_agent_id(agent_id.clone());
+
+        assert_eq!(checkpoint.agent_id, Some(agent_id));
     }
 
     #[test]
     fn test_checkpoint_serialization() {
         let session_id = Uuid::new_v4();
-        let checkpoint = Checkpoint::new(
-            session_id,
-            CheckpointType::Manual,
-            Some("Serialized checkpoint".to_string()),
-        );
+        let agent_id = AgentId::new();
+        let checkpoint = Checkpoint::new(session_id, Some("Serialized checkpoint".to_string()))
+            .with_agent_id(agent_id.clone());
 
         let serialized = serde_json::to_string(&checkpoint).unwrap();
         let deserialized: Checkpoint = serde_json::from_str(&serialized).unwrap();
 
         assert_eq!(checkpoint.id, deserialized.id);
         assert_eq!(checkpoint.session_id, deserialized.session_id);
-        assert_eq!(checkpoint.checkpoint_type, deserialized.checkpoint_type);
         assert_eq!(checkpoint.description, deserialized.description);
+        assert_eq!(checkpoint.agent_id, deserialized.agent_id);
     }
 
     #[test]
     fn test_checkpoint_list_item_from_checkpoint() {
         let session_id = Uuid::new_v4();
+        let agent_id = AgentId::new();
         let file_info = FileInfo {
             path: "test.txt".to_string(),
             size: 1024,
@@ -368,19 +332,17 @@ mod tests {
             content_hash: None,
         };
 
-        let checkpoint =
-            Checkpoint::new(session_id, CheckpointType::Manual, Some("Test".to_string()))
-                .with_affected_files(vec![file_info])
-                .with_parent_id("parent_456".to_string());
+        let checkpoint = Checkpoint::new(session_id, Some("Test".to_string()))
+            .with_affected_files(vec![file_info])
+            .with_agent_id(agent_id.clone());
 
         let list_item = CheckpointListItem::from(&checkpoint);
 
         assert_eq!(list_item.id, checkpoint.id);
         assert_eq!(list_item.created_at, checkpoint.created_at);
         assert_eq!(list_item.description, checkpoint.description);
-        assert_eq!(list_item.checkpoint_type, checkpoint.checkpoint_type);
         assert_eq!(list_item.file_count, 1);
-        assert_eq!(list_item.parent_id, checkpoint.parent_id);
+        assert_eq!(list_item.agent_id, Some(agent_id));
     }
 
     #[test]
@@ -389,13 +351,11 @@ mod tests {
         let request = CreateCheckpointRequest {
             session_id,
             description: Some("Test request".to_string()),
-            checkpoint_type: Some(CheckpointType::Manual),
             affected_files: Some(vec!["file1.txt".to_string(), "file2.txt".to_string()]),
         };
 
         assert_eq!(request.session_id, session_id);
         assert_eq!(request.description, Some("Test request".to_string()));
-        assert_eq!(request.checkpoint_type, Some(CheckpointType::Manual));
         assert_eq!(
             request.affected_files,
             Some(vec!["file1.txt".to_string(), "file2.txt".to_string()])
@@ -432,27 +392,23 @@ mod tests {
     #[test]
     fn test_chained_builders() {
         let session_id = Uuid::new_v4();
+        let agent_id = AgentId::new();
         let file_info = FileInfo {
             path: "test.txt".to_string(),
             size: 512,
             modified_at: Utc::now(),
             content_hash: None,
         };
-        let parent_id = "parent_789".to_string();
         let metadata = json!({"user": "test", "version": 1});
 
-        let checkpoint = Checkpoint::new(
-            session_id,
-            CheckpointType::Auto,
-            Some("Chained".to_string()),
-        )
-        .with_affected_files(vec![file_info])
-        .with_parent_id(parent_id.clone())
-        .with_metadata(metadata.clone());
+        let checkpoint = Checkpoint::new(session_id, Some("Chained".to_string()))
+            .with_affected_files(vec![file_info])
+            .with_metadata(metadata.clone())
+            .with_agent_id(agent_id.clone());
 
         assert_eq!(checkpoint.description, Some("Chained".to_string()));
         assert_eq!(checkpoint.affected_files.len(), 1);
-        assert_eq!(checkpoint.parent_id, Some(parent_id));
         assert_eq!(checkpoint.metadata, Some(metadata));
+        assert_eq!(checkpoint.agent_id, Some(agent_id));
     }
 }

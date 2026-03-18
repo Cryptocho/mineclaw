@@ -2,6 +2,7 @@
 //!
 //! 提供本地工具的 trait 定义和基础结构。
 
+use crate::agent::types::AgentId;
 use crate::checkpoint::CheckpointManager;
 use crate::config::Config;
 use crate::error::Result;
@@ -34,6 +35,8 @@ pub struct ToolContext {
     pub checkpoint_manager: Option<Arc<CheckpointManager>>,
     /// 总控接口（用于协作工具）
     pub orchestrator: Option<Arc<dyn OrchestrationInterface>>,
+    /// 当前执行工具的 Agent ID
+    pub agent_id: Option<AgentId>,
 }
 
 impl ToolContext {
@@ -44,6 +47,7 @@ impl ToolContext {
             config,
             checkpoint_manager: None,
             orchestrator: None,
+            agent_id: None,
         }
     }
 
@@ -56,6 +60,12 @@ impl ToolContext {
     /// 设置总控接口
     pub fn with_orchestrator(mut self, orchestrator: Arc<dyn OrchestrationInterface>) -> Self {
         self.orchestrator = Some(orchestrator);
+        self
+    }
+
+    /// 设置 Agent ID
+    pub fn with_agent_id(mut self, agent_id: AgentId) -> Self {
+        self.agent_id = Some(agent_id);
         self
     }
 }

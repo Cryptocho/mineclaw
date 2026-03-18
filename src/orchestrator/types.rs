@@ -123,6 +123,8 @@ pub enum TaskStatus {
     Completed,
     /// 失败
     Failed,
+    /// 已取消
+    Cancelled,
 }
 
 impl fmt::Display for TaskStatus {
@@ -132,6 +134,7 @@ impl fmt::Display for TaskStatus {
             TaskStatus::Running => write!(f, "Running"),
             TaskStatus::Completed => write!(f, "Completed"),
             TaskStatus::Failed => write!(f, "Failed"),
+            TaskStatus::Cancelled => write!(f, "Cancelled"),
         }
     }
 }
@@ -476,6 +479,7 @@ mod tests {
         assert_eq!(TaskStatus::Running.to_string(), "Running");
         assert_eq!(TaskStatus::Completed.to_string(), "Completed");
         assert_eq!(TaskStatus::Failed.to_string(), "Failed");
+        assert_eq!(TaskStatus::Cancelled.to_string(), "Cancelled");
     }
 
     #[test]

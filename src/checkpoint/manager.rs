@@ -1,3 +1,4 @@
+use crate::agent::types::AgentId;
 use crate::checkpoint::error::{CheckpointError, Result};
 use crate::config::CheckpointConfig;
 use crate::models::Session;
@@ -40,10 +41,10 @@ impl CheckpointManager {
     /// 创建 checkpoint
     pub async fn create_checkpoint(
         &self,
-        session: &Session,
+        session_id: Uuid,
         description: Option<String>,
-        checkpoint_type: CheckpointType,
         affected_files: Option<Vec<String>>,
+        agent_id: Option<AgentId>,
     ) -> Result<Checkpoint> {
         if !self.config.enabled {
             return Err(CheckpointError::InvalidData(
@@ -51,13 +52,10 @@ impl CheckpointManager {
             ));
         }
 
-        // 获取父 checkpoint
-        let parent_id = self.get_latest_checkpoint_id(&session.id).await?;
-
         // 创建 checkpoint 对象
-        let mut checkpoint = Checkpoint::new(session.id, checkpoint_type, description);
-        if let Some(parent_id) = parent_id {
-            checkpoint = checkpoint.with_parent_id(parent_id);
+        let mut checkpoint = Checkpoint::new(session_id, description);
+        if let Some(agent_id) = agent_id {
+            checkpoint = checkpoint.with_agent_id(agent_id);
         }
 
         // 收集文件信息
@@ -72,15 +70,13 @@ impl CheckpointManager {
         self.save_checkpoint(&checkpoint).await?;
 
         // 保存文件快照
-        self.save_file_snapshots(&checkpoint.id, &session.id, &file_infos)
+        self.save_file_snapshots(&checkpoint.id, &session_id, &file_infos)
             .await?;
-
-        // 保存会话快照
-        self.save_session_snapshot(&checkpoint.id, session).await?;
 
         info!(
             checkpoint_id = %checkpoint.id,
-            session_id = %session.id,
+            session_id = %session_id,
+            agent_id = ?agent_id,
             "Checkpoint created successfully"
         );
 
@@ -97,6 +93,28 @@ impl CheckpointManager {
         Ok(ListCheckpointsResponse {
             checkpoints: items,
             total_count: checkpoints.len(),
+        })
+    }
+
+    /// 按 Agent 列出 checkpoints
+    pub async fn list_checkpoints_for_agent(
+        &self,
+        session_id: &Uuid,
+        agent_id: &AgentId,
+    ) -> Result<ListCheckpointsResponse> {
+        let checkpoints = self.load_checkpoints_for_session(session_id).await?;
+
+        let items: Vec<CheckpointListItem> = checkpoints
+            .iter()
+            .filter(|c| c.agent_id.as_ref() == Some(agent_id))
+            .map(CheckpointListItem::from)
+            .collect();
+
+        let total_count = items.len();
+
+        Ok(ListCheckpointsResponse {
+            checkpoints: items,
+            total_count,
         })
     }
 
@@ -168,13 +186,6 @@ impl CheckpointManager {
 
     // ==================== 内部方法 ====================
 
-    /// 获取最新的 checkpoint ID
-    async fn get_latest_checkpoint_id(&self, session_id: &Uuid) -> Result<Option<String>> {
-        let mut checkpoints = self.load_checkpoints_for_session(session_id).await?;
-        checkpoints.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        Ok(checkpoints.first().map(|c| c.id.clone()))
-    }
-
     /// 删除会话的所有 checkpoints
     pub async fn delete_all_checkpoints_for_session(&self, session_id: &Uuid) -> Result<usize> {
         let checkpoints = self.load_checkpoints_for_session(session_id).await?;
@@ -204,6 +215,36 @@ impl CheckpointManager {
         );
 
         Ok(deleted_count)
+    }
+
+    /// 归档会话的所有 checkpoints
+    pub async fn archive_all_checkpoints_for_session(&self, session_id: &Uuid) -> Result<usize> {
+        let checkpoints = self.load_checkpoints_for_session(session_id).await?;
+        let mut archived_count = 0;
+
+        for mut checkpoint in checkpoints {
+            if !checkpoint.is_archived() {
+                checkpoint.archive();
+                match self.update_checkpoint(&checkpoint).await {
+                    Ok(_) => archived_count += 1,
+                    Err(e) => {
+                        warn!(
+                            checkpoint_id = %checkpoint.id,
+                            error = %e,
+                            "Failed to archive checkpoint"
+                        );
+                    }
+                }
+            }
+        }
+
+        info!(
+            session_id = %session_id,
+            count = %archived_count,
+            "Archived all checkpoints for session"
+        );
+
+        Ok(archived_count)
     }
 
     /// 按保留策略清理过期的 Checkpoint
@@ -704,19 +745,36 @@ mod tests {
         let session = create_test_session();
 
         let checkpoint = manager
+            .create_checkpoint(session.id, Some("Test checkpoint".to_string()), None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(checkpoint.session_id, session.id);
+        assert_eq!(checkpoint.description, Some("Test checkpoint".to_string()));
+        assert!(checkpoint.affected_files.is_empty());
+        assert!(checkpoint.agent_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_create_checkpoint_with_agent_id() {
+        let (agent_fs, _temp_dir) = create_test_agent_fs().await;
+        let config = create_test_config(true);
+        let manager = CheckpointManager::new(agent_fs, config);
+        let session = create_test_session();
+        let agent_id = AgentId::new();
+
+        let checkpoint = manager
             .create_checkpoint(
-                &session,
-                Some("Test checkpoint".to_string()),
-                CheckpointType::Manual,
+                session.id,
+                Some("Test with agent".to_string()),
                 None,
+                Some(agent_id.clone()),
             )
             .await
             .unwrap();
 
         assert_eq!(checkpoint.session_id, session.id);
-        assert_eq!(checkpoint.checkpoint_type, CheckpointType::Manual);
-        assert_eq!(checkpoint.description, Some("Test checkpoint".to_string()));
-        assert!(checkpoint.affected_files.is_empty());
+        assert_eq!(checkpoint.agent_id, Some(agent_id));
     }
 
     #[tokio::test]
@@ -731,10 +789,10 @@ mod tests {
 
         let checkpoint = manager
             .create_checkpoint(
-                &session,
+                session.id,
                 None,
-                CheckpointType::Auto,
                 Some(vec![test_file.to_string_lossy().to_string()]),
+                None,
             )
             .await
             .unwrap();
@@ -755,27 +813,72 @@ mod tests {
         let session = create_test_session();
 
         manager
-            .create_checkpoint(
-                &session,
-                Some("CP1".to_string()),
-                CheckpointType::Manual,
-                None,
-            )
+            .create_checkpoint(session.id, Some("CP1".to_string()), None, None)
             .await
             .unwrap();
         manager
-            .create_checkpoint(
-                &session,
-                Some("CP2".to_string()),
-                CheckpointType::Manual,
-                None,
-            )
+            .create_checkpoint(session.id, Some("CP2".to_string()), None, None)
             .await
             .unwrap();
 
         let response = manager.list_checkpoints(&session.id).await.unwrap();
         assert_eq!(response.total_count, 2);
         assert_eq!(response.checkpoints.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_list_checkpoints_for_agent() {
+        let (agent_fs, _temp_dir) = create_test_agent_fs().await;
+        let config = create_test_config(true);
+        let manager = CheckpointManager::new(agent_fs, config);
+        let session = create_test_session();
+        let agent1 = AgentId::new();
+        let agent2 = AgentId::new();
+
+        // agent1 创建 2 个 checkpoint
+        manager
+            .create_checkpoint(
+                session.id,
+                Some("CP1".to_string()),
+                None,
+                Some(agent1.clone()),
+            )
+            .await
+            .unwrap();
+        manager
+            .create_checkpoint(
+                session.id,
+                Some("CP2".to_string()),
+                None,
+                Some(agent1.clone()),
+            )
+            .await
+            .unwrap();
+
+        // agent2 创建 1 个 checkpoint
+        manager
+            .create_checkpoint(
+                session.id,
+                Some("CP3".to_string()),
+                None,
+                Some(agent2.clone()),
+            )
+            .await
+            .unwrap();
+
+        // 查询 agent1 的 checkpoint
+        let response = manager
+            .list_checkpoints_for_agent(&session.id, &agent1)
+            .await
+            .unwrap();
+        assert_eq!(response.total_count, 2);
+
+        // 查询 agent2 的 checkpoint
+        let response = manager
+            .list_checkpoints_for_agent(&session.id, &agent2)
+            .await
+            .unwrap();
+        assert_eq!(response.total_count, 1);
     }
 
     #[tokio::test]
@@ -786,12 +889,7 @@ mod tests {
         let session = create_test_session();
 
         let created = manager
-            .create_checkpoint(
-                &session,
-                Some("Get test".to_string()),
-                CheckpointType::Manual,
-                None,
-            )
+            .create_checkpoint(session.id, Some("Get test".to_string()), None, None)
             .await
             .unwrap();
 
@@ -808,7 +906,7 @@ mod tests {
         let session = create_test_session();
 
         let checkpoint = manager
-            .create_checkpoint(&session, None, CheckpointType::Manual, None)
+            .create_checkpoint(session.id, None, None, None)
             .await
             .unwrap();
 
@@ -826,11 +924,11 @@ mod tests {
         let session = create_test_session();
 
         manager
-            .create_checkpoint(&session, None, CheckpointType::Manual, None)
+            .create_checkpoint(session.id, None, None, None)
             .await
             .unwrap();
         manager
-            .create_checkpoint(&session, None, CheckpointType::Manual, None)
+            .create_checkpoint(session.id, None, None, None)
             .await
             .unwrap();
 
@@ -845,27 +943,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_checkpoint_parent_relationship() {
-        let (agent_fs, _temp_dir) = create_test_agent_fs().await;
-        let config = create_test_config(true);
-        let manager = CheckpointManager::new(agent_fs, config);
-        let session = create_test_session();
-
-        let cp1 = manager
-            .create_checkpoint(&session, None, CheckpointType::Manual, None)
-            .await
-            .unwrap();
-
-        let cp2 = manager
-            .create_checkpoint(&session, None, CheckpointType::Manual, None)
-            .await
-            .unwrap();
-
-        assert!(cp1.parent_id.is_none());
-        assert_eq!(cp2.parent_id, Some(cp1.id));
-    }
-
-    #[tokio::test]
     async fn test_checkpoint_disabled() {
         let (agent_fs, _temp_dir) = create_test_agent_fs().await;
         let config = create_test_config(false);
@@ -873,7 +950,7 @@ mod tests {
         let session = create_test_session();
 
         let result = manager
-            .create_checkpoint(&session, None, CheckpointType::Manual, None)
+            .create_checkpoint(session.id, None, None, None)
             .await;
 
         assert!(result.is_err());
@@ -898,12 +975,7 @@ mod tests {
         let file_path_str = test_file.to_string_lossy().to_string();
 
         let checkpoint = manager
-            .create_checkpoint(
-                &session,
-                None,
-                CheckpointType::Manual,
-                Some(vec![file_path_str.clone()]),
-            )
+            .create_checkpoint(session.id, None, Some(vec![file_path_str.clone()]), None)
             .await
             .unwrap();
 
@@ -976,14 +1048,52 @@ mod tests {
 
         let checkpoint = manager
             .create_checkpoint(
-                &session,
+                session.id,
                 None,
-                CheckpointType::Manual,
                 Some(vec!["/nonexistent/file.txt".to_string()]),
+                None,
             )
             .await
             .unwrap();
 
         assert!(checkpoint.affected_files.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_archive_all_checkpoints_for_session() {
+        let (agent_fs, _temp_dir) = create_test_agent_fs().await;
+        let config = create_test_config(true);
+        let manager = CheckpointManager::new(agent_fs, config);
+        let session = create_test_session();
+
+        // 创建几个 checkpoints
+        manager
+            .create_checkpoint(session.id, Some("CP1".to_string()), None, None)
+            .await
+            .unwrap();
+        manager
+            .create_checkpoint(session.id, Some("CP2".to_string()), None, None)
+            .await
+            .unwrap();
+
+        // 验证初始状态
+        let checkpoints = manager.list_checkpoints(&session.id).await.unwrap();
+        assert_eq!(checkpoints.checkpoints.len(), 2);
+
+        // 归档所有 checkpoints
+        let archived_count = manager
+            .archive_all_checkpoints_for_session(&session.id)
+            .await
+            .unwrap();
+        assert_eq!(archived_count, 2);
+
+        // 验证归档状态
+        let checkpoints = manager
+            .load_checkpoints_for_session(&session.id)
+            .await
+            .unwrap();
+        for cp in checkpoints {
+            assert!(cp.is_archived());
+        }
     }
 }
