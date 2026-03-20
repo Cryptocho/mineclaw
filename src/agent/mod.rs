@@ -17,6 +17,7 @@ pub use work_order::*;
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::llm::{ChatMessage, LlmProviderRegistry};
+use crate::tool_mask::types::ToolMask;
 use crate::tools::orchestration::OrchestrationInterface;
 use std::sync::Arc;
 use tracing::{debug, error, info};
@@ -53,6 +54,46 @@ impl AgentExecutor {
             local_tool_registry,
             config,
         }
+    }
+
+    /// 获取 Agent 可用的工具列表
+    ///
+    /// 根据 Agent 嵌入的 ToolMask 进行过滤。
+    pub async fn get_available_tools_for_agent(
+        &self,
+        agent: &Agent,
+    ) -> Result<Vec<(String, crate::models::Tool)>> {
+        let mask = agent.tool_mask.clone().unwrap_or_else(ToolMask::readonly);
+
+        let manager = self.mcp_server_manager.lock().await;
+        let all_mcp_tools = manager.all_tools();
+
+        let mut mcp_tools_by_server: std::collections::HashMap<String, Vec<(String, crate::models::Tool)>> =
+            std::collections::HashMap::new();
+        for (server_name, tool) in all_mcp_tools {
+            mcp_tools_by_server
+                .entry(server_name.clone())
+                .or_default()
+                .push((tool.name.clone(), tool));
+        }
+        drop(manager);
+
+        let mut tools = Vec::new();
+
+        for (server_name, server_tools) in mcp_tools_by_server {
+            let filtered = mask.filter_tools(Some(&server_name), server_tools);
+            tools.extend(filtered);
+        }
+
+        let local_tools = self.local_tool_registry.list_tools();
+        let local_tools_with_names: Vec<_> = local_tools
+            .into_iter()
+            .map(|t| (t.name.clone(), t))
+            .collect();
+
+        tools.extend(mask.filter_tools(None, local_tools_with_names));
+
+        Ok(tools)
     }
 
     /// 创建一个新的 Agent
@@ -129,9 +170,12 @@ impl AgentExecutor {
             let model_profile = &agent.llm_config.model_profile;
             let provider = self.provider_registry.get_provider(model_profile)?;
 
-            // 获取可用工具（简化版：暂时不传递工具，只做简单的LLM调用）
-            // 注意：完整的工具调用循环需要更复杂的消息历史管理
-            let tools = Vec::new();
+            // 获取可用工具（根据 Agent 的 ToolMask 过滤）
+            let available_tools = self.get_available_tools_for_agent(agent).await?;
+            let chat_tools: Vec<crate::llm::ChatTool> = available_tools
+                .iter()
+                .map(|(_, tool)| ChatMessage::tool_to_chat_tool(tool))
+                .collect();
 
             // 构建消息列表
             let messages = vec![
@@ -157,7 +201,7 @@ impl AgentExecutor {
                 "Calling LLM"
             );
 
-            let llm_response = provider.chat_with_tools(messages, tools).await?;
+            let llm_response = provider.chat_with_tools(messages, chat_tools).await?;
 
             // 处理响应
             result.success = true;

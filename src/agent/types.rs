@@ -26,6 +26,11 @@ impl AgentId {
         Self(Uuid::new_v4())
     }
 
+    /// 创建一个系统级 AgentId（用于非特定 Agent 的操作如 Session 状态变更）
+    pub fn system() -> Self {
+        Self(Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap())
+    }
+
     /// 从 Uuid 创建 AgentId
     pub fn from_uuid(uuid: Uuid) -> Self {
         Self(uuid)

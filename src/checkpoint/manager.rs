@@ -44,7 +44,7 @@ impl CheckpointManager {
         session_id: Uuid,
         description: Option<String>,
         affected_files: Option<Vec<String>>,
-        agent_id: Option<AgentId>,
+        agent_id: AgentId,
     ) -> Result<Checkpoint> {
         if !self.config.enabled {
             return Err(CheckpointError::InvalidData(
@@ -52,19 +52,15 @@ impl CheckpointManager {
             ));
         }
 
-        // 创建 checkpoint 对象
-        let mut checkpoint = Checkpoint::new(session_id, description);
-        if let Some(agent_id) = agent_id {
-            checkpoint = checkpoint.with_agent_id(agent_id);
-        }
-
-        // 收集文件信息
         let file_infos = if let Some(files) = affected_files {
             self.collect_file_infos(&files).await?
         } else {
             Vec::new()
         };
-        checkpoint = checkpoint.with_affected_files(file_infos.clone());
+
+        let checkpoint = Checkpoint::builder(session_id, agent_id, file_infos.clone())
+            .description(description.unwrap_or_default())
+            .build();
 
         // 保存 checkpoint
         self.save_checkpoint(&checkpoint).await?;
@@ -106,7 +102,7 @@ impl CheckpointManager {
 
         let items: Vec<CheckpointListItem> = checkpoints
             .iter()
-            .filter(|c| c.agent_id.as_ref() == Some(agent_id))
+            .filter(|c| c.agent_id == *agent_id)
             .map(CheckpointListItem::from)
             .collect();
 

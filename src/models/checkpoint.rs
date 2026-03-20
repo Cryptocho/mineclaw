@@ -101,7 +101,7 @@ pub struct Checkpoint {
     /// 所属会话 ID
     pub session_id: Uuid,
     /// 创建该 Checkpoint 的 Agent ID
-    pub agent_id: Option<AgentId>,
+    pub agent_id: AgentId,
     /// 创建时间
     pub created_at: DateTime<Utc>,
     /// 描述
@@ -117,23 +117,53 @@ pub struct Checkpoint {
     pub archived_at: Option<DateTime<Utc>>,
 }
 
+pub struct CheckpointBuilder {
+    session_id: Uuid,
+    agent_id: AgentId,
+    affected_files: Vec<FileInfo>,
+    description: Option<String>,
+    metadata: Option<serde_json::Value>,
+}
+
 impl Checkpoint {
-    /// 创建新的 Checkpoint
-    pub fn new(session_id: Uuid, description: Option<String>) -> Self {
-        Self {
-            id: Uuid::new_v4().to_string(),
+    pub fn builder(session_id: Uuid, agent_id: AgentId, affected_files: Vec<FileInfo>) -> CheckpointBuilder {
+        CheckpointBuilder {
             session_id,
-            agent_id: None,
-            created_at: Utc::now(),
-            description,
-            affected_files: Vec::new(),
+            agent_id,
+            affected_files,
+            description: None,
             metadata: None,
+        }
+    }
+}
+
+impl CheckpointBuilder {
+    pub fn description(mut self, desc: String) -> Self {
+        self.description = Some(desc);
+        self
+    }
+
+    pub fn metadata(mut self, meta: serde_json::Value) -> Self {
+        self.metadata = Some(meta);
+        self
+    }
+
+    pub fn build(self) -> Checkpoint {
+        Checkpoint {
+            id: Uuid::new_v4().to_string(),
+            session_id: self.session_id,
+            agent_id: self.agent_id,
+            created_at: Utc::now(),
+            description: self.description,
+            affected_files: self.affected_files,
+            metadata: self.metadata,
             is_archived: false,
             archived_at: None,
         }
     }
+}
 
-    /// 归档 Checkpoint
+impl Checkpoint {
     pub fn archive(&mut self) {
         if !self.is_archived {
             self.is_archived = true;
@@ -141,27 +171,8 @@ impl Checkpoint {
         }
     }
 
-    /// 检查是否已归档
     pub fn is_archived(&self) -> bool {
         self.is_archived
-    }
-
-    /// 添加受影响的文件
-    pub fn with_affected_files(mut self, files: Vec<FileInfo>) -> Self {
-        self.affected_files = files;
-        self
-    }
-
-    /// 设置元数据
-    pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
-        self.metadata = Some(metadata);
-        self
-    }
-
-    /// 设置创建该 Checkpoint 的 Agent
-    pub fn with_agent_id(mut self, agent_id: AgentId) -> Self {
-        self.agent_id = Some(agent_id);
-        self
     }
 }
 
@@ -183,7 +194,7 @@ pub struct CheckpointListItem {
     pub created_at: DateTime<Utc>,
     pub description: Option<String>,
     pub file_count: usize,
-    pub agent_id: Option<AgentId>,
+    pub agent_id: AgentId,
 }
 
 impl From<&Checkpoint> for CheckpointListItem {

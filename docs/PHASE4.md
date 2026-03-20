@@ -922,13 +922,6 @@
 - ImportanceBased: 基于重要性，删除最不重要的
 - Hybrid: 混合策略，结合时间和重要性
 
-**ContinuousMistakeDetector**
-- 检测持续犯错
-- session_id: SessionId
-- mistake_window_seconds: u64（时间窗口）
-- mistake_threshold: u32（错误次数阈值）
-- recent_mistakes: Vec<DateTime<Utc>>
-
 **WorkOrder**
 - 工单格式（作为 User Message）
 - completed_work: String（已完成部分详细标注）
@@ -985,11 +978,6 @@
 - 输出：Result<usize, Error>（裁剪的块数）
 - 从存储中移除被裁剪的块（或标记为已裁剪）
 - 创建 Checkpoint 保存裁剪前的状态
-
-**判断是否持续犯错**
-- 输入：SessionId, ContinuousMistakeDetector
-- 输出：Result<bool, Error>
-- 返回 true 表示在持续犯错
 
 **标记上下文块为重要**
 - 输入：ContextId, is_important: bool, retention_priority: Option<u8>

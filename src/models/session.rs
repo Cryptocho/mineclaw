@@ -333,7 +333,7 @@ impl Session {
             };
 
             checkpoint = Some(
-                cm.create_checkpoint(self.id, description, None, None)
+                cm.create_checkpoint(self.id, description, None, AgentId::system())
                     .await?,
             );
         }

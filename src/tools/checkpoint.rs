@@ -110,7 +110,7 @@ impl LocalTool for ListCheckpointsTool {
                 created_at: item.created_at.to_rfc3339(),
                 description: item.description,
                 file_count: item.file_count,
-                agent_id: item.agent_id.map(|a| a.to_string()),
+                agent_id: Some(item.agent_id.to_string()),
             })
             .collect();
 

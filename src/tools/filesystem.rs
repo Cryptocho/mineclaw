@@ -97,13 +97,21 @@ async fn maybe_create_checkpoint(
         affected_files
     );
 
+    let agent_id = match context.agent_id {
+        Some(id) => id,
+        None => {
+            debug!("Agent ID not available, skipping checkpoint creation");
+            return Ok(None);
+        }
+    };
+
     // 创建 checkpoint
     let checkpoint = checkpoint_manager
         .create_checkpoint(
             context.session.id,
             description,
             Some(affected_files),
-            context.agent_id,
+            agent_id,
         )
         .await?;
 

@@ -14,16 +14,13 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use super::error::Result;
-use crate::checkpoint::CheckpointManager;
-
 use agentfs::{AgentFS, KvStore};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 #[derive(Clone)]
 pub struct SessionRepository {
     sessions: Arc<RwLock<HashMap<Uuid, Session>>>,
     agent_fs: Option<Arc<AgentFS>>,
-    checkpoint_manager: Option<Arc<CheckpointManager>>,
 }
 
 impl std::fmt::Debug for SessionRepository {
@@ -41,7 +38,6 @@ impl SessionRepository {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             agent_fs: None,
-            checkpoint_manager: None,
         }
     }
 
@@ -50,34 +46,11 @@ impl SessionRepository {
         let repo = Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             agent_fs: Some(Arc::new(agent_fs)),
-            checkpoint_manager: None,
         };
 
         repo.load_sessions_from_agentfs().await?;
 
         Ok(repo)
-    }
-
-    /// 创建新的 SessionRepository（带 agentfs 和 checkpoint manager）
-    pub async fn with_agent_fs_and_checkpoint(
-        agent_fs: AgentFS,
-        checkpoint_manager: CheckpointManager,
-    ) -> Result<Self> {
-        let repo = Self {
-            sessions: Arc::new(RwLock::new(HashMap::new())),
-            agent_fs: Some(Arc::new(agent_fs)),
-            checkpoint_manager: Some(Arc::new(checkpoint_manager)),
-        };
-
-        repo.load_sessions_from_agentfs().await?;
-
-        Ok(repo)
-    }
-
-    /// 设置 CheckpointManager
-    pub fn with_checkpoint_manager(mut self, checkpoint_manager: CheckpointManager) -> Self {
-        self.checkpoint_manager = Some(Arc::new(checkpoint_manager));
-        self
     }
 
     /// 从 agentfs 加载所有会话到内存
@@ -157,32 +130,12 @@ impl SessionRepository {
     }
 
     pub async fn create(&self) -> Session {
-        let mut session = Session::new();
+        let session = Session::new();
         let mut sessions = self.sessions.write().await;
         sessions.insert(session.id, session.clone());
         drop(sessions);
 
-        // 如果有 CheckpointManager，创建初始 Checkpoint
-        if let Some(checkpoint_manager) = &self.checkpoint_manager {
-            if let Ok(checkpoint) = checkpoint_manager
-                .create_checkpoint(
-                    session.id,
-                    Some("Initial checkpoint".to_string()),
-                    None,
-                    None,
-                )
-                .await
-            {
-                session.current_checkpoint_id = Some(checkpoint.id.clone());
-                // 更新 Session
-                let mut sessions = self.sessions.write().await;
-                sessions.insert(session.id, session.clone());
-                drop(sessions);
-                self.save_session_to_agentfs(&session).await;
-            }
-        } else {
-            self.save_session_to_agentfs(&session).await;
-        }
+        self.save_session_to_agentfs(&session).await;
 
         session
     }
@@ -259,29 +212,6 @@ impl SessionRepository {
         let mut sessions = self.sessions.write().await;
         if sessions.remove(id).is_some() {
             drop(sessions);
-
-            // 清理相关的 checkpoints
-            if let Some(checkpoint_manager) = &self.checkpoint_manager {
-                match checkpoint_manager
-                    .delete_all_checkpoints_for_session(id)
-                    .await
-                {
-                    Ok(count) => {
-                        info!(
-                            session_id = %id,
-                            checkpoint_count = %count,
-                            "Cleaned up checkpoints for deleted session"
-                        );
-                    }
-                    Err(e) => {
-                        warn!(
-                            session_id = %id,
-                            error = %e,
-                            "Failed to clean up checkpoints for deleted session"
-                        );
-                    }
-                }
-            }
 
             self.delete_session_from_agentfs(id).await;
 

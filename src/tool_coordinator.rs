@@ -39,6 +39,7 @@ pub trait ToolCoordinatorCallback: Send + Sync {
 }
 
 /// 空回调实现（默认行为）
+#[derive(Clone)]
 pub struct NoopCallback;
 
 #[async_trait]
@@ -52,7 +53,7 @@ impl ToolCoordinatorCallback for NoopCallback {
 
 // ==================== ToolCoordinator ====================
 
-/// 工具调用协调器
+#[derive(Clone)]
 pub struct ToolCoordinator {
     llm_provider: Arc<dyn LlmProvider>,
     mcp_server_manager: Arc<Mutex<McpServerManager>>,
@@ -123,7 +124,7 @@ impl ToolCoordinator {
         callback: C,
     ) -> Result<(String, Vec<Message>)>
     where
-        C: ToolCoordinatorCallback,
+        C: ToolCoordinatorCallback + Clone + 'static,
     {
         info!(
             "Starting tool coordinator, message_count={}",
@@ -132,8 +133,10 @@ impl ToolCoordinator {
 
         let mut intermediate_messages = Vec::new();
         let mut iteration = 0;
+        let callback = Arc::new(callback);
 
         while iteration < self.max_iterations {
+            let callback = callback.clone();
             iteration += 1;
             debug!("Tool coordinator iteration {}", iteration);
 
@@ -166,42 +169,68 @@ impl ToolCoordinator {
             if !llm_response.tool_calls.is_empty() {
                 info!("LLM returned {} tool calls", llm_response.tool_calls.len());
 
-                // 方案：只创建 ToolCall 消息，文本放在 ToolCall 消息的 content 中
-                // 这样避免了消息重复，也保持了数据完整性
                 let mut tool_call_message =
                     self.create_tool_call_message(&session.messages, &llm_response.tool_calls);
 
-                // 如果有文本，添加到 ToolCall 消息中并触发回调
                 if let Some(text) = &llm_response.text
                     && !text.is_empty()
                 {
                     tool_call_message.content = text.clone();
-                    callback.on_assistant_message(text).await;
+                    callback.clone().on_assistant_message(text).await;
                 }
 
                 intermediate_messages.push(tool_call_message);
 
-                // 执行工具调用
+                use tokio::task::JoinSet;
+                let mut join_set = JoinSet::new();
+
                 for tool_call in llm_response.tool_calls {
-                    // 触发工具调用回调
-                    callback
-                        .on_tool_call(&tool_call.name, &tool_call.arguments)
-                        .await;
+                    let callback = callback.clone();
+                    let this = self.clone();
+                    let session = session.clone();
 
-                    let result = self.execute_tool(tool_call.clone(), &session).await?;
+                    join_set.spawn(async move {
+                        let tool_name = tool_call.name.clone();
+                        let tool_args = tool_call.arguments.clone();
 
-                    // 触发工具结果回调
-                    callback
-                        .on_tool_result(&result.text_content, result.is_error)
-                        .await;
+                        callback.on_tool_call(&tool_name, &tool_args).await;
 
-                    // 创建工具结果消息
+                        let result = this.execute_tool(tool_call.clone(), &session).await;
+
+                        callback.on_tool_result(
+                            result.as_ref().map(|r| r.text_content.as_str()).unwrap_or(""),
+                            result.as_ref().map(|r| r.is_error).unwrap_or(true)
+                        ).await;
+
+                        (tool_call, result)
+                    });
+                }
+
+                let mut tool_results = Vec::new();
+                while let Some(res) = join_set.join_next().await {
+                    if let Ok((tool_call, result)) = res {
+                        tool_results.push((tool_call, result));
+                    }
+                }
+
+                tool_results.sort_by_key(|(tc, _)| tc.id.clone());
+
+                for (tool_call, result) in tool_results {
+                    let result = match result {
+                        Ok(r) => r,
+                        Err(e) => ExecutionResult {
+                            tool_name: tool_call.name.clone(),
+                            is_error: true,
+                            text_content: e.to_string(),
+                            raw_content: vec![],
+                        },
+                    };
+
                     let tool_result_message =
                         self.create_tool_result_message(&session.messages, &tool_call, &result);
                     intermediate_messages.push(tool_result_message);
                 }
             } else {
-                // 没有工具调用，结束循环
                 info!(
                     "LLM returned only text response, ending after {} iterations",
                     iteration
@@ -210,14 +239,12 @@ impl ToolCoordinator {
                     .text
                     .ok_or_else(|| Error::Llm("LLM returned empty response".into()))?;
 
-                // 添加最终的文本消息
                 let assistant_message =
                     self.create_assistant_message(&session.messages, final_text.clone());
                 intermediate_messages.push(assistant_message);
 
-                // 触发助手消息回调和完成回调
-                callback.on_assistant_message(&final_text).await;
-                callback.on_completed("").await;
+                callback.clone().on_assistant_message(&final_text).await;
+                callback.clone().on_completed("").await;
 
                 return Ok((final_text, intermediate_messages));
             }

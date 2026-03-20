@@ -19,6 +19,7 @@ use uuid::Uuid;
 /// SSE 事件通道
 ///
 /// 用于将工具协调器的事件转发到 SSE 流。
+#[derive(Clone)]
 pub struct SseChannel {
     sender: mpsc::UnboundedSender<SseEvent>,
 }
