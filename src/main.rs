@@ -5,15 +5,13 @@ use std::net::SocketAddr;
 use agentfs::AgentFS;
 use agentsql::SqlBackend;
 use axum::serve;
-use mineclaw::agent::context::ContextStore;
-use mineclaw::agent::context_manager::ContextManagerAgent;
 use mineclaw::checkpoint::CheckpointManager;
 use mineclaw::mcp::{McpServerManager, ToolExecutor};
 use mineclaw::orchestrator::executor::OrchestratorExecutor;
 use mineclaw::orchestrator::task_manager::TaskManager;
 use mineclaw::tools::{
-    LocalToolRegistry, checkpoint::CheckpointTools, filesystem::FilesystemTool,
-    terminal::TerminalTool,
+    LocalToolRegistry, checkpoint::CheckpointTools, context_management::ContextTools,
+    filesystem::FilesystemTool, terminal::TerminalTool,
 };
 use mineclaw::{
     AppState, Config, LlmProviderRegistry, SessionRepository, ToolCoordinator, create_router,
@@ -62,7 +60,7 @@ async fn main() -> mineclaw::Result<()> {
     let checkpoint_manager_arc = checkpoint_manager.clone();
     info!("CheckpointManager initialized successfully");
 
-    let session_repo = SessionRepository::new();
+    let session_repo = Arc::new(SessionRepository::new());
     let provider_registry = Arc::new(LlmProviderRegistry::from_config(&config)?);
 
     // 包装为 Arc，后面需要用到
@@ -100,6 +98,7 @@ async fn main() -> mineclaw::Result<()> {
     FilesystemTool::register_all(&mut local_tool_registry);
     CheckpointTools::register_all(&mut local_tool_registry);
     TerminalTool::register_all(&mut local_tool_registry);
+    ContextTools::register_all(&mut local_tool_registry);
     info!(
         "Local tools registered: {:?}",
         local_tool_registry
@@ -116,21 +115,15 @@ async fn main() -> mineclaw::Result<()> {
     let mcp_server_manager_arc = std::sync::Arc::new(tokio::sync::Mutex::new(mcp_server_manager));
 
     // 初始化 Phase 4 组件
-    info!("Initializing TaskManager and ContextManagerAgent...");
+    info!("Initializing TaskManager...");
     let task_manager = Arc::new(tokio::sync::Mutex::new(TaskManager::new()));
-    let context_store = ContextStore::new();
-    let context_manager = Arc::new(ContextManagerAgent::with_config(
-        context_store,
-        config.context_manager.max_tokens,
-        config.context_manager.trim_hint.clone(),
-        config.context_manager.threshold,
-    ));
-    let orchestrator_executor = Arc::new(OrchestratorExecutor::new(
+    let orchestrator_executor = Arc::new(OrchestratorExecutor::with_session_repo(
         provider_registry.clone(),
         mcp_server_manager_arc.clone(),
         tool_executor.clone(),
         local_tool_registry_arc.clone(),
         config_arc.clone(),
+        session_repo.clone(),
     ));
 
     // 创建 ToolCoordinator
@@ -155,7 +148,6 @@ async fn main() -> mineclaw::Result<()> {
         checkpoint_manager,
         orchestrator_executor,
         task_manager,
-        context_manager,
     );
     let app = create_router(app_state);
 

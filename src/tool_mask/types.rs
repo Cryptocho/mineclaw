@@ -142,6 +142,16 @@ impl ToolMask {
         self.updated_at = Utc::now();
     }
 
+    /// 设置本地工具权限
+    pub fn set_local_permission(
+        &mut self,
+        tool_name: String,
+        permission: FsPermission,
+    ) {
+        self.local_permissions.insert(tool_name, permission);
+        self.updated_at = Utc::now();
+    }
+
     /// 检查 MCP 工具是否可见/可用
     pub fn is_mcp_tool_available(&self, server_name: &str, tool_name: &str) -> bool {
         // 默认 MCP 工具不可见

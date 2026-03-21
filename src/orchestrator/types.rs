@@ -193,68 +193,6 @@ impl ParallelTasks {
     }
 }
 
-// ==================== CMA 通知类型 ====================
-
-/// CMA 通知类型
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CmaNotificationType {
-    /// 回退并转交
-    RollbackAndHandover,
-    /// 上下文已裁剪
-    ContextTrimmed,
-}
-
-impl fmt::Display for CmaNotificationType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            CmaNotificationType::RollbackAndHandover => write!(f, "RollbackAndHandover"),
-            CmaNotificationType::ContextTrimmed => write!(f, "ContextTrimmed"),
-        }
-    }
-}
-
-/// CMA 通知
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CmaNotification {
-    /// 通知类型
-    pub notification_type: CmaNotificationType,
-    /// 会话 ID
-    pub session_id: Uuid,
-    /// 目标总控 ID
-    pub target_orchestrator_id: OrchestratorId,
-    /// 检查点 ID（可选）
-    pub checkpoint_id: Option<String>,
-    /// 原因
-    pub reason: String,
-    /// 创建时间
-    pub created_at: DateTime<Utc>,
-}
-
-impl CmaNotification {
-    /// 创建新的 CMA 通知
-    pub fn new(
-        notification_type: CmaNotificationType,
-        session_id: Uuid,
-        target_orchestrator_id: OrchestratorId,
-        reason: String,
-    ) -> Self {
-        Self {
-            notification_type,
-            session_id,
-            target_orchestrator_id,
-            checkpoint_id: None,
-            reason,
-            created_at: Utc::now(),
-        }
-    }
-
-    /// 设置检查点 ID
-    pub fn with_checkpoint_id(mut self, checkpoint_id: String) -> Self {
-        self.checkpoint_id = Some(checkpoint_id);
-        self
-    }
-}
-
 // ==================== 总控配置 ====================
 
 /// 总控配置

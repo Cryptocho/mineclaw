@@ -12,6 +12,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 pub mod checkpoint;
+pub mod context_management;
 pub mod filesystem;
 pub mod orchestration;
 pub mod registry;
@@ -19,6 +20,7 @@ pub mod shell_detection;
 pub mod terminal;
 
 pub use self::checkpoint::{CheckpointTools, ListCheckpointsTool, RestoreCheckpointTool};
+pub use self::context_management::{ContextTools, ReadMessagesTool, TrimMessagesTool};
 pub use self::orchestration::OrchestrationInterface;
 pub use registry::LocalToolRegistry;
 

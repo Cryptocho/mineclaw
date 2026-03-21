@@ -17,7 +17,7 @@ pub use work_order::*;
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::llm::{ChatMessage, ChatTool, LlmProviderRegistry};
-use crate::models::ToolCall;
+use crate::models::{SessionRepository, ToolCall};
 use crate::tool_mask::types::ToolMask;
 use crate::tools::orchestration::OrchestrationInterface;
 use crate::tools::ToolContext;
@@ -41,6 +41,8 @@ pub struct AgentExecutor {
     pub local_tool_registry: Arc<crate::tools::LocalToolRegistry>,
     /// 应用配置
     pub config: Arc<Config>,
+    /// Session 仓库（用于工具执行时获取真实 session）
+    pub session_repo: Option<Arc<SessionRepository>>,
 }
 
 impl AgentExecutor {
@@ -58,6 +60,26 @@ impl AgentExecutor {
             tool_executor,
             local_tool_registry,
             config,
+            session_repo: None,
+        }
+    }
+
+    /// 使用 SessionRepository 创建 AgentExecutor
+    pub fn with_session_repo(
+        provider_registry: Arc<LlmProviderRegistry>,
+        mcp_server_manager: Arc<tokio::sync::Mutex<crate::mcp::McpServerManager>>,
+        tool_executor: crate::mcp::ToolExecutor,
+        local_tool_registry: Arc<crate::tools::LocalToolRegistry>,
+        config: Arc<Config>,
+        session_repo: Arc<SessionRepository>,
+    ) -> Self {
+        Self {
+            provider_registry,
+            mcp_server_manager,
+            tool_executor,
+            local_tool_registry,
+            config,
+            session_repo: Some(session_repo),
         }
     }
 
@@ -267,8 +289,8 @@ impl AgentExecutor {
                     result.tool_calls.push(record);
                 }
 
-                if let Some(text) = current_text {
-                    if !text.is_empty() {
+                if let Some(text) = current_text
+                    && !text.is_empty() {
                         let assistant_msg = ChatMessage {
                             role: "assistant".to_string(),
                             content: Some(text),
@@ -286,7 +308,6 @@ impl AgentExecutor {
                         };
                         messages.push(assistant_msg);
                     }
-                }
             }
 
             Err(Error::MaxToolIterations {
@@ -331,19 +352,38 @@ impl AgentExecutor {
         if self.local_tool_registry.has_tool(&tool_call.name) {
             debug!(tool_name = %tool_call.name, "Executing as local tool");
 
-            let session = crate::models::Session {
-                id: session_id,
-                title: None,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-                state: crate::models::SessionState::Active,
-                orchestrator_id: None,
-                current_checkpoint_id: None,
-                archived_at: None,
-                messages: Vec::new(),
-                metadata: std::collections::HashMap::new(),
-                lifecycle_events: Vec::new(),
-                agent_checkpoints: std::collections::HashMap::new(),
+            let session = if let Some(ref repo) = self.session_repo {
+                repo.get(&session_id).await.unwrap_or_else(|| {
+                    crate::models::Session {
+                        id: session_id,
+                        title: None,
+                        created_at: chrono::Utc::now(),
+                        updated_at: chrono::Utc::now(),
+                        state: crate::models::SessionState::Active,
+                        orchestrator_id: None,
+                        current_checkpoint_id: None,
+                        archived_at: None,
+                        messages: Vec::new(),
+                        metadata: std::collections::HashMap::new(),
+                        lifecycle_events: Vec::new(),
+                        agent_checkpoints: std::collections::HashMap::new(),
+                    }
+                })
+            } else {
+                crate::models::Session {
+                    id: session_id,
+                    title: None,
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
+                    state: crate::models::SessionState::Active,
+                    orchestrator_id: None,
+                    current_checkpoint_id: None,
+                    archived_at: None,
+                    messages: Vec::new(),
+                    metadata: std::collections::HashMap::new(),
+                    lifecycle_events: Vec::new(),
+                    agent_checkpoints: std::collections::HashMap::new(),
+                }
             };
 
             let context = ToolContext::new(session, Arc::clone(&self.config));

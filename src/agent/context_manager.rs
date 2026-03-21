@@ -1,14 +1,43 @@
 //! 上下文管理器
 //!
 //! 提供 CMA 上下文管理功能。
+//!
+//! CMA 直接执行回退，不通过通知机制：
+//!
+//! ## 两种触发路径
+//!
+//! **路径 1：Agent 主动求助（不经过 CMA）**
+//! - Agent 意识到自己无法解决的问题 → 直接发求助工单给 Master
+//! - Master 分析后决定如何处理
+//!
+//! **路径 2：上下文满载时 CMA 处理**
+//! - 上下文超过阈值 → CMA 自动处理
+//! - CMA 像编辑 JSON 一样编辑上下文：读取 → 分析 → 编辑
+//!   - 如果分析时发现权限外的问题，通过 OrchestrationInterface 发工单给 Master
+//!   - 完成后插入 trim_hint 通知 Agent
 
 use tracing::info;
 
 use crate::agent::context::{ContextChunk, ContextChunkType, ContextStore};
-use crate::agent::work_order::WorkOrder;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::models::Session;
-use crate::orchestrator::types::{CmaNotification, CmaNotificationType};
+
+// ============================================================================
+// CmaResult - CMA 操作结果
+// ============================================================================
+
+/// CMA 操作结果
+///
+/// 指示 CMA 处理后的下一步行动。
+#[derive(Debug, Clone)]
+pub enum CmaResult {
+    /// CMA 已处理完成（裁剪）
+    Handled,
+    /// 上下文已被裁剪
+    ContextTrimmed {
+        removed_token_count: usize,
+    },
+}
 
 // ============================================================================
 // ContextManagerAgent - 上下文管理 Agent
@@ -16,7 +45,10 @@ use crate::orchestrator::types::{CmaNotification, CmaNotificationType};
 
 /// 上下文管理 Agent
 ///
-/// 负责监控和维护所有会话的上下文，处理裁剪和求助请求。
+/// 负责监控和维护所有会话的上下文，处理裁剪。
+///
+/// 注意：CMA 分析上下文时如果发现 Agent 权限外的问题，
+/// 应该通过 OrchestrationInterface::submit_help_work_order 发工单给 Master。
 pub struct ContextManagerAgent {
     /// 上下文存储
     pub store: ContextStore,
@@ -57,7 +89,8 @@ impl ContextManagerAgent {
     /// 分析内容复杂度并返回调整后的阈值
     ///
     /// 当检测到任务复杂度高时，降低阈值以保留更多上下文
-    fn analyze_and_adjust_threshold(&self, chunks: &[ContextChunk]) -> f64 {
+    #[allow(dead_code)]
+    pub fn analyze_and_adjust_threshold(&self, chunks: &[ContextChunk]) -> f64 {
         if chunks.is_empty() {
             return self.threshold;
         }
@@ -101,11 +134,16 @@ impl ContextManagerAgent {
     }
 
     /// 向会话添加上下文并监控限制
+    ///
+    /// CMA 的主要入口：
+    /// - 当上下文接近限制时，触发裁剪
+    /// - CMA 像编辑 JSON 一样：读取 → 分析 → 编辑
+    /// - 如果分析时发现权限外的问题，通过 OrchestrationInterface 发工单给 Master
     pub async fn add_chunk_and_monitor(
         &self,
         chunk: ContextChunk,
-        session: &Session,
-    ) -> Result<Option<CmaNotification>> {
+        _session: &Session,
+    ) -> Result<CmaResult> {
         let session_id = chunk.session_id;
         self.store.add_chunk(chunk).await;
 
@@ -120,7 +158,7 @@ impl ContextManagerAgent {
                 session_id = %session_id,
                 current_tokens = %current_token_count,
                 trigger_threshold = %trigger_threshold,
-                "Context approaching limit, triggering auto-trim"
+                "Context approaching limit, CMA trimming"
             );
 
             let target_tokens = (self.global_max_tokens as f64 * 0.8) as usize;
@@ -159,52 +197,11 @@ impl ContextManagerAgent {
                 "Context trimmed successfully"
             );
 
-            if let Some(orchestrator_id) = session.orchestrator_id {
-                return Ok(Some(CmaNotification::new(
-                    CmaNotificationType::ContextTrimmed,
-                    session_id,
-                    orchestrator_id,
-                    format!(
-                        "Automatically trimmed {} tokens due to context limit",
-                        removed_count
-                    ),
-                )));
-            }
+            return Ok(CmaResult::ContextTrimmed {
+                removed_token_count: removed_count,
+            });
         }
 
-        Ok(None)
-    }
-
-    /// 处理求助工单
-    pub async fn handle_help_request(
-        &self,
-        work_order: WorkOrder,
-        session: &Session,
-    ) -> Result<CmaNotification> {
-        let session_id = work_order.session_id;
-        let orchestrator_id = session.orchestrator_id.ok_or_else(|| Error::Internal)?;
-
-        info!(
-            session_id = %session_id,
-            work_order_id = %work_order.id(),
-            "Processing help request in CMA"
-        );
-
-        self.store
-            .add_chunk(ContextChunk::from_work_order(&work_order))
-            .await;
-
-        let mut notification = CmaNotification::new(
-            CmaNotificationType::RollbackAndHandover,
-            session_id,
-            orchestrator_id,
-            format!("Agent requested help: {}", work_order.title),
-        );
-
-        if let Some(checkpoint_id) = work_order.suggested_checkpoint_id {
-            notification = notification.with_checkpoint_id(checkpoint_id);
-        }
-
-        Ok(notification)
+        Ok(CmaResult::Handled)
     }
 }

@@ -2,7 +2,7 @@
 //!
 //! 提供总控的创建、Agent 管理、任务分配和工单处理等核心功能。
 
-use chrono::Utc;
+use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -12,11 +12,12 @@ use crate::agent::{
 };
 use crate::error::{Error, Result};
 use crate::mcp::{McpServerManager, ToolExecutor};
+use crate::models::SessionRepository;
 use crate::tools::LocalToolRegistry;
 
 use super::task_manager::SharedTaskManager;
 use super::types::{
-    CmaNotification, CmaNotificationType, Orchestrator, OrchestratorConfig, ParallelTasks, TaskId,
+    Orchestrator, OrchestratorConfig, ParallelTasks, TaskId,
     TaskStatus,
 };
 
@@ -26,7 +27,6 @@ use crate::llm::LlmProviderRegistry;
 use crate::tools::orchestration::OrchestrationInterface;
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
 /// 总控执行器
@@ -43,6 +43,8 @@ pub struct OrchestratorExecutor {
     pub local_tool_registry: Arc<LocalToolRegistry>,
     /// 应用配置
     pub config: Arc<Config>,
+    /// Session 仓库（用于工具执行时获取真实 session）
+    pub session_repo: Option<Arc<SessionRepository>>,
 }
 
 impl OrchestratorExecutor {
@@ -60,6 +62,26 @@ impl OrchestratorExecutor {
             tool_executor,
             local_tool_registry,
             config,
+            session_repo: None,
+        }
+    }
+
+    /// 使用 SessionRepository 创建 OrchestratorExecutor
+    pub fn with_session_repo(
+        provider_registry: Arc<LlmProviderRegistry>,
+        mcp_server_manager: Arc<Mutex<McpServerManager>>,
+        tool_executor: ToolExecutor,
+        local_tool_registry: Arc<LocalToolRegistry>,
+        config: Arc<Config>,
+        session_repo: Arc<SessionRepository>,
+    ) -> Self {
+        Self {
+            provider_registry,
+            mcp_server_manager,
+            tool_executor,
+            local_tool_registry,
+            config,
+            session_repo: Some(session_repo),
         }
     }
 }
@@ -92,13 +114,24 @@ impl OrchestratorExecutor {
         );
 
         // 创建 AgentExecutor 实例
-        let agent_executor = AgentExecutor::new(
-            self.provider_registry.clone(),
-            self.mcp_server_manager.clone(),
-            self.tool_executor.clone(),
-            self.local_tool_registry.clone(),
-            self.config.clone(),
-        );
+        let agent_executor = if let Some(ref repo) = self.session_repo {
+            AgentExecutor::with_session_repo(
+                self.provider_registry.clone(),
+                self.mcp_server_manager.clone(),
+                self.tool_executor.clone(),
+                self.local_tool_registry.clone(),
+                self.config.clone(),
+                repo.clone(),
+            )
+        } else {
+            AgentExecutor::new(
+                self.provider_registry.clone(),
+                self.mcp_server_manager.clone(),
+                self.tool_executor.clone(),
+                self.local_tool_registry.clone(),
+                self.config.clone(),
+            )
+        };
 
         // 创建总控自身的 Agent
         let agent = agent_executor.create_agent(config.agent_config.clone())?;
@@ -154,13 +187,24 @@ impl OrchestratorExecutor {
         }
 
         // 创建 AgentExecutor 实例
-        let agent_executor = AgentExecutor::new(
-            self.provider_registry.clone(),
-            self.mcp_server_manager.clone(),
-            self.tool_executor.clone(),
-            self.local_tool_registry.clone(),
-            self.config.clone(),
-        );
+        let agent_executor = if let Some(ref repo) = self.session_repo {
+            AgentExecutor::with_session_repo(
+                self.provider_registry.clone(),
+                self.mcp_server_manager.clone(),
+                self.tool_executor.clone(),
+                self.local_tool_registry.clone(),
+                self.config.clone(),
+                repo.clone(),
+            )
+        } else {
+            AgentExecutor::new(
+                self.provider_registry.clone(),
+                self.mcp_server_manager.clone(),
+                self.tool_executor.clone(),
+                self.local_tool_registry.clone(),
+                self.config.clone(),
+            )
+        };
 
         // 创建 Agent
         let agent = agent_executor.create_agent(agent_config)?;
@@ -271,71 +315,48 @@ impl OrchestratorExecutor {
             .ok_or_else(|| Error::AgentNotFound(agent_id.to_string()))?;
 
         // 创建 AgentExecutor 实例
-        let agent_executor = AgentExecutor::new(
-            self.provider_registry.clone(),
-            self.mcp_server_manager.clone(),
-            self.tool_executor.clone(),
-            self.local_tool_registry.clone(),
-            self.config.clone(),
-        );
-
-        let task_session_id = task.session_id;
+        let agent_executor = if let Some(ref repo) = self.session_repo {
+            AgentExecutor::with_session_repo(
+                self.provider_registry.clone(),
+                self.mcp_server_manager.clone(),
+                self.tool_executor.clone(),
+                self.local_tool_registry.clone(),
+                self.config.clone(),
+                repo.clone(),
+            )
+        } else {
+            AgentExecutor::new(
+                self.provider_registry.clone(),
+                self.mcp_server_manager.clone(),
+                self.tool_executor.clone(),
+                self.local_tool_registry.clone(),
+                self.config.clone(),
+            )
+        };
 
         // 执行任务
         let result = agent_executor.execute_task(agent, task, provider).await;
 
-        if let Err(Error::MaxToolIterations { message, tool_call_count }) = &result {
-            error!(
+        if let Err(Error::MaxToolIterations { message: _, tool_call_count }) = &result {
+            warn!(
                 orchestrator_id = %orchestrator.id,
                 agent_id = %agent_id,
                 tool_call_count = %tool_call_count,
-                "Max tool iterations reached, constructing CMA notification"
+                max_iterations = %self.config.context_manager.max_tool_iterations,
+                "Max tool iterations reached - Agent may need self-correction or human intervention"
             );
-
-            let notification = CmaNotification::new(
-                CmaNotificationType::RollbackAndHandover,
-                orchestrator.session_id.unwrap_or_else(Uuid::new_v4),
-                orchestrator.id,
-                format!(
-                    "Max tool iterations ({}) reached. {} tool calls executed. {}",
-                    self.config.context_manager.max_tool_iterations,
-                    tool_call_count,
-                    message
-                ),
-            );
-
-            let (new_orch, forwarded) = Self::handle_cma_notification(
-                orchestrator.clone(),
-                notification,
-                None,
-            )?;
-
-            if let Some(_fwd) = forwarded {
-                warn!(
-                    orchestrator_id = %new_orch.id,
-                    "CMA notification forwarded to parent"
-                );
-            }
-
-            *orchestrator = new_orch;
         }
 
-        let result = result.unwrap_or_else(|e| {
+        let result = result.map_err(|e| {
             if matches!(e, Error::MaxToolIterations { .. }) {
-                AgentTaskResult {
-                    success: false,
-                    agent_id: *agent_id,
-                    session_id: task_session_id,
-                    response: "Max tool iterations reached, CMA notified for context trimming".to_string(),
-                    tool_calls: Vec::new(),
-                    error: None,
-                    execution_time_ms: 0,
-                    new_checkpoint_id: None,
-                }
-            } else {
-                panic!("Unexpected error: {:?}", e);
+                error!(
+                    orchestrator_id = %orchestrator.id,
+                    agent_id = %agent_id,
+                    "Max tool iterations error propagated to caller for handling"
+                );
             }
-        });
+            e
+        })?;
 
         info!(
             orchestrator_id = %orchestrator.id,
@@ -483,98 +504,6 @@ impl OrchestratorExecutor {
         Ok(work_order)
     }
 
-    /// 处理 CMA 通知
-    ///
-    /// # 参数
-    /// * `orchestrator` - 总控实例
-    /// * `notification` - CMA 通知
-    /// * `task_manager` - 任务管理器（可选，用于取消相关任务）
-    ///
-    /// # 返回
-    /// 返回更新后的总控和需要转发给父总控的通知（如果有）
-    pub fn handle_cma_notification(
-        mut orchestrator: Orchestrator,
-        notification: CmaNotification,
-        task_manager: Option<&SharedTaskManager>,
-    ) -> Result<(Orchestrator, Option<CmaNotification>)> {
-        debug!(
-            orchestrator_id = %orchestrator.id,
-            target_orchestrator_id = %notification.target_orchestrator_id,
-            notification_type = ?notification.notification_type,
-            session_id = %notification.session_id,
-            "Handling CMA notification"
-        );
-
-        if notification.target_orchestrator_id != orchestrator.id {
-            if let Some(parent_id) = orchestrator.parent_orchestrator_id {
-                info!(
-                    orchestrator_id = %orchestrator.id,
-                    target_orchestrator_id = %notification.target_orchestrator_id,
-                    parent_orchestrator_id = %parent_id,
-                    "CMA notification not for this orchestrator, forwarding to parent"
-                );
-                let forwarded_notification = CmaNotification::new(
-                    notification.notification_type,
-                    notification.session_id,
-                    parent_id,
-                    notification.reason,
-                );
-                return Ok((orchestrator, Some(forwarded_notification)));
-            } else {
-                info!(
-                    orchestrator_id = %orchestrator.id,
-                    target_orchestrator_id = %notification.target_orchestrator_id,
-                    "CMA notification not for this orchestrator, no parent to forward to"
-                );
-                return Ok((orchestrator, None));
-            }
-        }
-
-        match notification.notification_type {
-            CmaNotificationType::RollbackAndHandover => {
-                info!(
-                    orchestrator_id = %orchestrator.id,
-                    checkpoint_id = ?notification.checkpoint_id,
-                    reason = %notification.reason,
-                    "Processing RollbackAndHandover notification"
-                );
-
-                if let Some(_tm) = task_manager {
-                    info!(
-                        orchestrator_id = %orchestrator.id,
-                        "TaskManager available, but session-based task cancellation not implemented yet"
-                    );
-                }
-
-                info!(
-                    orchestrator_id = %orchestrator.id,
-                    "RollbackAndHandover placeholder - full implementation pending"
-                );
-            }
-            CmaNotificationType::ContextTrimmed => {
-                info!(
-                    orchestrator_id = %orchestrator.id,
-                    reason = %notification.reason,
-                    "Processing ContextTrimmed notification"
-                );
-
-                info!(
-                    orchestrator_id = %orchestrator.id,
-                    "ContextTrimmed placeholder - full implementation pending"
-                );
-            }
-        }
-
-        orchestrator.updated_at = Utc::now();
-
-        info!(
-            orchestrator_id = %orchestrator.id,
-            "CMA notification handled successfully"
-        );
-
-        Ok((orchestrator, None))
-    }
-
     /// 关联会话
     ///
     /// # 参数
@@ -586,6 +515,136 @@ impl OrchestratorExecutor {
     pub fn associate_session(orchestrator: Orchestrator, session_id: Uuid) -> Orchestrator {
         orchestrator.with_session_id(session_id)
     }
+
+    /// 触发 CMA（上下文管理 Agent）处理上下文满载
+    ///
+    /// 当 Agent 达到最大工具调用次数时调用此方法。
+    ///
+    /// # 参数
+    /// * `session_id` - 要处理的会话 ID
+    /// * `problem_description` - 问题描述（可选）
+    ///
+    /// # 返回
+    /// 返回 CMA 处理结果
+    pub async fn spawn_cma(
+        &self,
+        session_id: Uuid,
+        problem_description: Option<String>,
+    ) -> Result<CmaResult> {
+        info!(
+            session_id = %session_id,
+            "Spawning CMA to handle context overflow"
+        );
+
+        let session_repo = self.session_repo.as_ref().ok_or_else(|| Error::Internal)?;
+
+        let session: crate::models::Session = session_repo.get(&session_id).await.ok_or_else(|| {
+            Error::SessionNotFound(session_id.to_string())
+        })?;
+
+        let cma_system_prompt = format!(
+            "You are the Context Management Agent (CMA). Your role is to analyze and optimize the conversation context.
+
+Current task: {}
+Instructions:
+1. Use read_messages to examine the current conversation
+2. Use trim_messages to remove less important messages while keeping context intact
+3. If the context is severely overloaded, you may need to:
+   - Identify the most important recent messages to keep
+   - Add a system notice summarizing what was trimmed
+   - Request human intervention if the context cannot be reasonably managed
+
+Remember: Your goal is to make the conversation manageable while preserving critical information.",
+            problem_description.unwrap_or_else(|| "Handle context overflow".to_string())
+        );
+
+        let mut tool_mask = crate::tool_mask::types::ToolMask::new();
+        tool_mask.set_local_permission(
+            "read_messages".to_string(),
+            crate::tool_mask::types::FsPermission::ReadOnly,
+        );
+        tool_mask.set_local_permission(
+            "trim_messages".to_string(),
+            crate::tool_mask::types::FsPermission::ReadWrite,
+        );
+        tool_mask.set_local_permission(
+            "request_help".to_string(),
+            crate::tool_mask::types::FsPermission::ReadOnly,
+        );
+
+        let llm_config = crate::agent::LlmConfig::new("default".to_string());
+
+        let cma_config = AgentConfig::new(
+            "CMA".to_string(),
+            AgentRole::ContextManager,
+            llm_config,
+            cma_system_prompt,
+        )
+        .with_tool_mask(tool_mask);
+
+        let agent_executor = AgentExecutor::with_session_repo(
+            self.provider_registry.clone(),
+            self.mcp_server_manager.clone(),
+            self.tool_executor.clone(),
+            self.local_tool_registry.clone(),
+            self.config.clone(),
+            session_repo.clone(),
+        );
+
+        let mut cma_agent = agent_executor.create_agent(cma_config)?;
+
+        let cma_task = AgentTask {
+            agent_id: cma_agent.id,
+            session_id,
+            user_message: "Please analyze and optimize the conversation context.".to_string(),
+            tools: None,
+            checkpoint_id: None,
+        };
+
+        let result = agent_executor
+            .execute_task(&mut cma_agent, cma_task, None)
+            .await;
+
+        match result {
+            Ok(task_result) => {
+                if task_result.success {
+                    session_repo.update(session).await?;
+
+                    Ok(CmaResult {
+                        success: true,
+                        trimmed_count: 0,
+                        message: "CMA handled context successfully".to_string(),
+                    })
+                } else {
+                    Ok(CmaResult {
+                        success: false,
+                        trimmed_count: 0,
+                        message: task_result.error.unwrap_or_else(|| "CMA task failed".to_string()),
+                    })
+                }
+            }
+            Err(e) => {
+                Ok(CmaResult {
+                    success: false,
+                    trimmed_count: 0,
+                    message: format!("CMA execution error: {}", e),
+                })
+            }
+        }
+    }
+}
+
+// ==================== CmaResult ====================
+
+/// CMA 处理结果
+#[derive(Debug, Clone)]
+pub struct CmaResult {
+    /// 是否成功
+    pub success: bool,
+    /// 裁剪的消息数量
+    pub trimmed_count: usize,
+    /// 结果消息
+    pub message: String,
 }
 
 // ==================== OrchestrationProvider ====================
@@ -594,7 +653,7 @@ impl OrchestratorExecutor {
 ///
 /// 为本地工具提供访问总控能力的能力，同时保持模块解耦。
 #[derive(Clone)]
-pub struct OrchestratorProvider {
+pub struct OrchestrationProvider {
     /// 共享的总控状态
     pub orchestrator: Arc<RwLock<Orchestrator>>,
     /// 共享的任务管理器
@@ -609,11 +668,13 @@ pub struct OrchestratorProvider {
     pub local_tool_registry: Arc<LocalToolRegistry>,
     /// 应用配置
     pub config: Arc<Config>,
+    /// Session 仓库
+    pub session_repo: Option<Arc<SessionRepository>>,
 }
 
-impl std::fmt::Debug for OrchestratorProvider {
+impl std::fmt::Debug for OrchestrationProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OrchestratorProvider")
+        f.debug_struct("OrchestrationProvider")
             .field("orchestrator", &"Arc<RwLock<Orchestrator>>")
             .field("task_manager", &self.task_manager)
             .field("provider_registry", &"Arc<LlmProviderRegistry>")
@@ -621,12 +682,14 @@ impl std::fmt::Debug for OrchestratorProvider {
             .field("tool_executor", &"ToolExecutor")
             .field("local_tool_registry", &"Arc<LocalToolRegistry>")
             .field("config", &self.config)
+            .field("session_repo", &"Option<Arc<SessionRepository>>")
             .finish()
     }
 }
 
-impl OrchestratorProvider {
+impl OrchestrationProvider {
     /// 创建新的总控提供者
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         orchestrator: Arc<RwLock<Orchestrator>>,
         task_manager: Option<SharedTaskManager>,
@@ -635,6 +698,7 @@ impl OrchestratorProvider {
         tool_executor: ToolExecutor,
         local_tool_registry: Arc<LocalToolRegistry>,
         config: Arc<Config>,
+        session_repo: Option<Arc<SessionRepository>>,
     ) -> Self {
         Self {
             orchestrator,
@@ -644,12 +708,13 @@ impl OrchestratorProvider {
             tool_executor,
             local_tool_registry,
             config,
+            session_repo,
         }
     }
 }
 
 #[async_trait]
-impl OrchestrationInterface for OrchestratorProvider {
+impl OrchestrationInterface for OrchestrationProvider {
     async fn submit_report_work_order(
         &self,
         completed_details: &str,
@@ -758,13 +823,24 @@ impl OrchestrationInterface for OrchestratorProvider {
         // 因为 OrchestratorExecutor::create_agent 消费 Orchestrator，
         // 我们利用 Orchestrator 是 Clone 的特性进行原地更新。
         // 创建 AgentExecutor 实例
-        let agent_executor = AgentExecutor::new(
-            self.provider_registry.clone(),
-            self.mcp_server_manager.clone(),
-            self.tool_executor.clone(),
-            self.local_tool_registry.clone(),
-            self.config.clone(),
-        );
+        let agent_executor = if let Some(ref repo) = self.session_repo {
+            AgentExecutor::with_session_repo(
+                self.provider_registry.clone(),
+                self.mcp_server_manager.clone(),
+                self.tool_executor.clone(),
+                self.local_tool_registry.clone(),
+                self.config.clone(),
+                repo.clone(),
+            )
+        } else {
+            AgentExecutor::new(
+                self.provider_registry.clone(),
+                self.mcp_server_manager.clone(),
+                self.tool_executor.clone(),
+                self.local_tool_registry.clone(),
+                self.config.clone(),
+            )
+        };
 
         // 创建 Agent
         let agent = agent_executor.create_agent(agent_config)?;
@@ -824,13 +900,24 @@ impl OrchestrationInterface for OrchestratorProvider {
             }))
         } else {
             // 创建 OrchestratorExecutor 实例
-            let orch_executor = OrchestratorExecutor::new(
-                self.provider_registry.clone(),
-                self.mcp_server_manager.clone(),
-                self.tool_executor.clone(),
-                self.local_tool_registry.clone(),
-                self.config.clone(),
-            );
+            let orch_executor = if let Some(ref repo) = self.session_repo {
+                OrchestratorExecutor::with_session_repo(
+                    self.provider_registry.clone(),
+                    self.mcp_server_manager.clone(),
+                    self.tool_executor.clone(),
+                    self.local_tool_registry.clone(),
+                    self.config.clone(),
+                    repo.clone(),
+                )
+            } else {
+                OrchestratorExecutor::new(
+                    self.provider_registry.clone(),
+                    self.mcp_server_manager.clone(),
+                    self.tool_executor.clone(),
+                    self.local_tool_registry.clone(),
+                    self.config.clone(),
+                )
+            };
 
             let result = orch_executor
                 .assign_task_serial(&mut orch, &agent_id, task, Some(Arc::new(self.clone())))

@@ -10,13 +10,11 @@ use crate::tool_coordinator::ToolCoordinator;
 use crate::tools::LocalToolRegistry;
 use agentfs::AgentFS;
 
-// Phase 4 additions
-use crate::agent::context_manager::ContextManagerAgent;
 use crate::orchestrator::executor::OrchestratorExecutor;
 use crate::orchestrator::task_manager::SharedTaskManager;
 #[derive(Clone)]
 pub struct AppState {
-    pub session_repo: SessionRepository,
+    pub session_repo: Arc<SessionRepository>,
     pub provider_registry: Arc<LlmProviderRegistry>,
     pub mcp_server_manager: Arc<Mutex<McpServerManager>>,
     pub tool_executor: ToolExecutor,
@@ -29,13 +27,12 @@ pub struct AppState {
     // Phase 4 components
     pub orchestrator_executor: Arc<OrchestratorExecutor>,
     pub task_manager: SharedTaskManager,
-    pub context_manager: Arc<ContextManagerAgent>,
 }
 
 impl AppState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        session_repo: SessionRepository,
+        session_repo: Arc<SessionRepository>,
         provider_registry: Arc<LlmProviderRegistry>,
         mcp_server_manager: Arc<Mutex<McpServerManager>>,
         tool_executor: ToolExecutor,
@@ -46,7 +43,6 @@ impl AppState {
         checkpoint_manager: Arc<CheckpointManager>,
         orchestrator_executor: Arc<OrchestratorExecutor>,
         task_manager: SharedTaskManager,
-        context_manager: Arc<ContextManagerAgent>,
     ) -> Self {
         Self {
             session_repo,
@@ -60,7 +56,6 @@ impl AppState {
             checkpoint_manager,
             orchestrator_executor,
             task_manager,
-            context_manager,
         }
     }
 
